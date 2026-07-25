@@ -11,7 +11,7 @@ public sealed class SettingsData
     public const int FishCountMin = 1, FishCountMax = 60;
     public const int BubbleDensityMin = 0, BubbleDensityMax = 200;
     public const float SpeedMultiplierMin = 0.25f, SpeedMultiplierMax = 3.0f;
-    public static readonly int[] AllowedFpsValues = [30, 60];
+    public static readonly int[] AllowedFpsValues = [30, 60, 120];
 
     // Defaults (Win95 underwater)
     public const int DefaultFishCount = 12;

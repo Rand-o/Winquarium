@@ -1,6 +1,8 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace AquariumSaver;
@@ -42,11 +44,14 @@ public class ScreensaverForm : Form
     readonly ExitWatcher? _exitWatcher;
     readonly int _seed;
     readonly SettingsData _settings;
-    System.Windows.Forms.Timer? _timer;
+    System.Windows.Forms.Timer? _renderTimer;
+    readonly Stopwatch _renderClock = new();
+    double _lastRenderTime;
+    volatile bool _closing;
     Scene? _scene;
     Bitmap? _backBuffer;
     Graphics? _backGraphics;
-    bool _closing;
+    Size _clientSize;
 
     public ScreensaverForm(Screen? screen, ExitWatcher? exitWatcher, int seed, SettingsData settings)
     {
@@ -69,80 +74,241 @@ public class ScreensaverForm : Form
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
+
         InitScene();
-        _timer = new System.Windows.Forms.Timer { Interval = 16 };
-        _timer.Tick += OnTimerTick;
-        _timer.Start();
+
+        // Draw the first complete frame before allowing Windows to paint.
+        _scene?.Update(0.0);
+        _scene?.Draw(_backGraphics!, _clientSize);
+
+        int targetFps = Math.Clamp(
+            _settings.TargetFps > 0
+                ? _settings.TargetFps
+                : DetectRefreshRate(),
+            30,
+            120);
+
+        _renderClock.Restart();
+        _lastRenderTime = _renderClock.Elapsed.TotalSeconds;
+
+        _renderTimer = new System.Windows.Forms.Timer
+        {
+            Interval = Math.Max(1, 1000 / targetFps)
+        };
+
+        _renderTimer.Tick += RenderTimerTick;
+        _renderTimer.Start();
     }
 
-    void OnTimerTick(object? sender, EventArgs e)
+    private void RenderTimerTick(object? sender, EventArgs e)
     {
-        if (_closing || _exitWatcher?.ShouldQuit == true) return;
-
-        // Render every timer tick (~60hz) for smooth motion on
-        // high-refresh displays.  The Scene uses a shared Stopwatch
-        // so animation time is always continuous and smooth.
-        if (_backGraphics != null)
+        if (_closing ||
+            IsDisposed ||
+            _scene == null ||
+            _backGraphics == null ||
+            _backBuffer == null)
         {
-            _scene?.Draw(_backGraphics, ClientSize);
+            return;
         }
 
+        double now = _renderClock.Elapsed.TotalSeconds;
+        double elapsed = Math.Clamp(
+            now - _lastRenderTime,
+            0.0,
+            0.05);
+
+        _lastRenderTime = now;
+
+        // Timer Tick and OnPaint both execute on the UI thread.
+        // OnPaint therefore cannot copy a partially rendered bitmap.
+        _scene.Update(elapsed);
+        _scene.Draw(_backGraphics, _clientSize);
+
         Invalidate();
-        Update();
     }
 
-    void InitScene()
+    /// <summary>
+    /// Detect the primary display refresh rate, clamped to 30-120hz.
+    /// Falls back to 60hz if detection fails.
+    /// </summary>
+    static int DetectRefreshRate()
     {
+        try
+        {
+            var screen = Screen.PrimaryScreen;
+            if (screen != null)
+            {
+                // Use the device mode to query refresh rate.
+                var dm = new DevMode
+                {
+                    dmSize = (short)Marshal.SizeOf(typeof(DevMode))
+                };
+                if (EnumDisplaySettings(screen.DeviceName, -1, ref dm) && dm.dmDisplayFrequency > 0)
+                {
+                    return Math.Clamp((int)dm.dmDisplayFrequency, 30, 120);
+                }
+            }
+        }
+        catch { /* fall through to default */ }
+        return 60;
+    }
+
+    // DEVMODEA — matches the Windows SDK layout exactly.
+    // dmPosition is a POINTL (two ints), not two shorts.
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    struct DevMode
+    {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmDeviceName;
+        public short dmSpecVersion;
+        public short dmDriverVersion;
+        public short dmSize;
+        public short dmDriverExtra;
+        public int dmFields;
+        public int dmPositionX;
+        public int dmPositionY;
+        public int dmDisplayOrientation;
+        public int dmDisplayFixedOutput;
+        public short dmColor;
+        public short dmDuplex;
+        public short dmYResolution;
+        public short dmTTOption;
+        public short dmCollate;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmFormName;
+        public short dmLogPixels;
+        public int dmBitsPerPel;
+        public int dmPelsWidth;
+        public int dmPelsHeight;
+        public int dmDisplayFlags;
+        public int dmDisplayFrequency;
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
+    static extern bool EnumDisplaySettings(string lpszDeviceName, int iModeNum, ref DevMode lpDevMode);
+
+    private void InitScene()
+    {
+        _backGraphics?.Dispose();
+        _backGraphics = null;
+
+        _backBuffer?.Dispose();
+        _backBuffer = null;
+
+        _scene?.Dispose();
+        _scene = null;
+
+        _clientSize = new Size(
+            Math.Max(1, ClientSize.Width),
+            Math.Max(1, ClientSize.Height));
+
         // Full-screen monitor forms use the four-argument constructor so
         // every monitor shares one virtual-desktop aquarium.
         if (_screen != null)
         {
-            _scene = new Scene(_seed, _settings, ClientSize, _screen.Bounds);
+            _scene = new Scene(
+                _seed,
+                _settings,
+                _clientSize,
+                _screen.Bounds);
         }
         else
         {
-            _scene = new Scene(_seed, _settings, ClientSize);
+            _scene = new Scene(
+                _seed,
+                _settings,
+                _clientSize);
         }
-        _backBuffer = new Bitmap(ClientSize.Width, ClientSize.Height);
+
+        _backBuffer = new Bitmap(
+            _clientSize.Width,
+            _clientSize.Height,
+            PixelFormat.Format32bppPArgb);
+
         _backGraphics = Graphics.FromImage(_backBuffer);
+
         _backGraphics.SmoothingMode = SmoothingMode.AntiAlias;
         _backGraphics.InterpolationMode = InterpolationMode.HighQualityBilinear;
         _backGraphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+        // Make sure the first buffer is a complete scene rather than
+        // an uninitialized black bitmap.
+        _scene.Draw(_backGraphics, _clientSize);
     }
 
     protected override void OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
-        _backBuffer?.Dispose(); _backGraphics?.Dispose();
-        _backBuffer = new Bitmap(ClientSize.Width, ClientSize.Height);
-        _backGraphics = Graphics.FromImage(_backBuffer);
-        _backGraphics.SmoothingMode = SmoothingMode.AntiAlias;
-        _backGraphics.InterpolationMode = InterpolationMode.HighQualityBilinear;
-        _backGraphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+        if (!IsHandleCreated ||
+            ClientSize.Width <= 0 ||
+            ClientSize.Height <= 0)
+        {
+            return;
+        }
+
+        _backGraphics?.Dispose();
+        _backGraphics = null;
+
+        _backBuffer?.Dispose();
+        _backBuffer = null;
+
         _scene?.Dispose();
+        _scene = null;
+
+        _clientSize = ClientSize;
+
         if (_screen != null)
         {
-            _scene = new Scene(_seed, _settings, ClientSize, _screen.Bounds);
+            _scene = new Scene(
+                _seed,
+                _settings,
+                _clientSize,
+                _screen.Bounds);
         }
         else
         {
-            _scene = new Scene(_seed, _settings, ClientSize);
+            _scene = new Scene(
+                _seed,
+                _settings,
+                _clientSize);
         }
+
+        _backBuffer = new Bitmap(
+            _clientSize.Width,
+            _clientSize.Height,
+            PixelFormat.Format32bppPArgb);
+
+        _backGraphics = Graphics.FromImage(_backBuffer);
+
+        _backGraphics.SmoothingMode = SmoothingMode.AntiAlias;
+        _backGraphics.InterpolationMode = InterpolationMode.HighQualityBilinear;
+        _backGraphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+        // Immediately initialize the new buffer.
+        _scene.Draw(_backGraphics, _clientSize);
+
+        Invalidate();
     }
 
-    protected override void OnPaintBackground(PaintEventArgs e) { }
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        // The complete back buffer covers the client area — no erase needed.
+    }
 
     protected override void OnPaint(PaintEventArgs e)
     {
         if (_backBuffer != null)
+        {
             e.Graphics.DrawImageUnscaled(_backBuffer, 0, 0);
+        }
     }
 
     protected override void WndProc(ref Message m)
     {
         if (m.Msg == Native.WM_DISPLAYCHANGE)
         {
-            if (!_closing) { _closing = true; _timer?.Stop(); Application.Exit(); }
+            if (!_closing) { _closing = true; _renderTimer?.Stop(); Application.Exit(); }
         }
         else if (m.Msg is 0x0200 or 0x0201 or 0x0204 or 0x0207 or 0x0100 or 0x0101)
         {
@@ -153,12 +319,16 @@ public class ScreensaverForm : Form
         base.WndProc(ref m);
     }
 
-    void OnQuit(object? s, EventArgs e)
+    private void OnQuit(object? sender, EventArgs e)
     {
-        if (_closing) return;
+        if (_closing)
+            return;
+
         _closing = true;
-        _timer?.Stop();
+
+        _renderTimer?.Stop();
         _exitWatcher?.RemoveQuit(OnQuit);
+
         Application.Exit();
     }
 
@@ -166,12 +336,30 @@ public class ScreensaverForm : Form
     {
         if (disposing)
         {
+            _closing = true;
+
+            if (_renderTimer != null)
+            {
+                _renderTimer.Stop();
+                _renderTimer.Dispose();
+                _renderTimer = null;
+            }
+
+            _renderClock.Stop();
+
             _exitWatcher?.RemoveQuit(OnQuit);
-            _timer?.Dispose();
+
+            // Graphics must be disposed before the bitmap it targets.
             _backGraphics?.Dispose();
+            _backGraphics = null;
+
             _backBuffer?.Dispose();
+            _backBuffer = null;
+
             _scene?.Dispose();
+            _scene = null;
         }
+
         base.Dispose(disposing);
     }
 }
@@ -349,7 +537,7 @@ public class ConfigForm : Form
 
         AddLabel(xL, y, "Target FPS:");
         _cmbFps = new ComboBox { Location = new Point(xR, y + 1), DropDownStyle = ComboBoxStyle.DropDownList, Width = 60 };
-        _cmbFps.Items.AddRange(new object[] { "30", "60" });
+        _cmbFps.Items.AddRange(new object[] { "30", "60", "120" });
         Controls.Add(_cmbFps);
         y += rh + 12;
 

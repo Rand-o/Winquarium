@@ -166,13 +166,12 @@ public sealed class Scene : IDisposable
     }
 
     /// <summary>
-    /// Retained for compatibility with the existing render loop.
-    ///
-    /// Animation uses one shared Stopwatch, so several monitor windows cannot
-    /// accidentally advance the simulation several times per frame.
+    /// Advance the shared simulation by the given wall-clock delta.
+    /// Called once per render frame from the background render thread.
     /// </summary>
     public void Update(double deltaTime)
     {
+        _world.Advance((float)deltaTime);
     }
 
     public void Draw(
@@ -236,23 +235,30 @@ public sealed class Scene : IDisposable
         {
             if (!_localScene)
             {
-                // Convert virtual-desktop positions into this monitor's local
-                // client coordinates.
+                // Establish the monitor-local clip while the transform is
+                // still identity — the clip rectangle is in device
+                // coordinates so it must be set before translating.
+                graphics.SetClip(
+                    new Rectangle(
+                        0,
+                        0,
+                        clientSize.Width,
+                        clientSize.Height),
+                    CombineMode.Replace);
+
+                // Convert virtual-desktop world positions into monitor-local
+                // pixels.
                 graphics.TranslateTransform(
                     -viewportBounds.Left,
-                    -viewportBounds.Top);
-
-                // Clip to the visible viewport so we don't waste time
-                // rendering off-screen content on large / multi-monitor setups.
-                using var clipRegion = new Region(
-                    new Rectangle(0, 0, clientSize.Width, clientSize.Height));
-                graphics.SetClip(clipRegion, CombineMode.Replace);
+                    -viewportBounds.Top,
+                    MatrixOrder.Append);
             }
 
             _world.Draw(
                 graphics,
                 virtualBounds,
-                viewportBounds);
+                viewportBounds,
+                alpha: 1.0f);
         }
         finally
         {
@@ -281,8 +287,16 @@ public sealed class Scene : IDisposable
 
 internal sealed class SharedAquarium
 {
-    private readonly Stopwatch _clock =
-        Stopwatch.StartNew();
+    private readonly object _advanceLock = new();
+
+    /// <summary>Raw elapsed simulation time (seconds) at the start of the current frame.</summary>
+    private float _prevSimTime;
+
+    /// <summary>Raw elapsed simulation time (seconds) at the end of the current frame.</summary>
+    private float _currSimTime;
+
+    /// <summary>Monotonically increasing wall-clock used to drive simulation time.</summary>
+    private readonly Stopwatch _clock = Stopwatch.StartNew();
 
     private readonly FishActor[] _fish;
     private readonly BubbleStream[] _bubbleStreams;
@@ -388,14 +402,46 @@ internal sealed class SharedAquarium
             3 + random.Next(5));
     }
 
+    /// <summary>
+    /// Called once per frame from the UI-thread render timer.
+    /// Derives absolute simulation time from the process-wide stopwatch
+    /// so multiple monitors sharing one SharedAquarium do not advance
+    /// time independently.
+    /// </summary>
+    public void Advance(float elapsedSeconds)
+    {
+        lock (_advanceLock)
+        {
+            float absoluteTime =
+                (float)_clock.Elapsed.TotalSeconds *
+                _speedMultiplier;
+
+            _prevSimTime = _currSimTime;
+            _currSimTime = absoluteTime;
+        }
+    }
+
+    /// <summary>
+    /// Render the scene at the interpolated position between the last two
+    /// simulation steps.  <paramref name="alpha"/> is 0.0 = previous frame,
+    /// 1.0 = current frame.  When rendering immediately after Advance(),
+    /// pass 1.0 for maximum smoothness on high-refresh displays.
+    /// </summary>
     public void Draw(
         Graphics graphics,
         Rectangle virtualBounds,
-        Rectangle viewportBounds)
+        Rectangle viewportBounds,
+        float alpha)
     {
-        float time =
-            (float)_clock.Elapsed.TotalSeconds *
-            _speedMultiplier;
+        float prevSimTime, currSimTime;
+        lock (_advanceLock)
+        {
+            prevSimTime = _prevSimTime;
+            currSimTime = _currSimTime;
+        }
+
+        // Interpolated time: blend between the two simulation boundaries.
+        float time = prevSimTime + (currSimTime - prevSimTime) * alpha;
 
         // Use the viewport (current monitor) height so each monitor sizes
         // its own content independently.
