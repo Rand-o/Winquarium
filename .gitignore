@@ -1,0 +1,8 @@
+bin/
+obj/
+publish/
+*.sln
+*.user
+*.userosscache
+*.suo
+.vs/
