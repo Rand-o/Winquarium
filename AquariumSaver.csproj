@@ -9,13 +9,15 @@
     <UseWindowsForms>true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
-  
+
   <ItemGroup>
-  <None Update="Sprites\**\*">
-    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-  </None>
-</ItemGroup>
+    <!-- Exclude AquariumSpriteGenerator from the main project's compilation -->
+    <Compile Remove="AquariumSpriteGenerator\**\*" />
+    <Content Include="Sprites\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+  </ItemGroup>
 
 </Project>

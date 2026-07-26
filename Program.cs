@@ -8,6 +8,26 @@ internal static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        // Register global exception handlers before any UI work.
+        Application.SetUnhandledExceptionMode(
+            UnhandledExceptionMode.CatchException);
+
+        Application.ThreadException += (_, argsEx) =>
+        {
+            AppLog.Log(
+                "UI-thread exception:" +
+                Environment.NewLine +
+                argsEx.Exception);
+        };
+
+        AppDomain.CurrentDomain.UnhandledException += (_, argsEx) =>
+        {
+            AppLog.Log(
+                "Unhandled exception:" +
+                Environment.NewLine +
+                argsEx.ExceptionObject);
+        };
+
         try
         {
             var windowed = args.Any(a => a.Equals("--windowed", StringComparison.OrdinalIgnoreCase));
@@ -29,9 +49,10 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AquariumSaver");
-            Directory.CreateDirectory(logDir);
-            File.AppendAllText(Path.Combine(logDir, "error.log"), $"{DateTime.UtcNow:O} {ex}\n");
+            AppLog.Log(
+                "Startup exception:" +
+                Environment.NewLine +
+                ex);
             return 1;
         }
     }

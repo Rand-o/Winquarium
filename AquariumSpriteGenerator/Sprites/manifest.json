@@ -1,0 +1,91 @@
+{
+  "sourceSize": {
+    "width": 1339,
+    "height": 800
+  },
+  "frameRate": 30,
+  "animationMode": "retro-cel-deformation",
+  "fish": [
+    {
+      "name": "yellow-butterflyfish",
+      "directory": "Fish/yellow-butterflyfish",
+      "frames": 30,
+      "frameRate": 30,
+      "facesRight": false,
+      "nominalScale": 0.84,
+      "speed": 0.024,
+      "movement": "fish"
+    },
+    {
+      "name": "stingray",
+      "directory": "Fish/stingray",
+      "frames": 40,
+      "frameRate": 30,
+      "facesRight": true,
+      "nominalScale": 1.15,
+      "speed": 0.014,
+      "movement": "stingray"
+    },
+    {
+      "name": "blue-triggerfish",
+      "directory": "Fish/blue-triggerfish",
+      "frames": 40,
+      "frameRate": 30,
+      "facesRight": true,
+      "nominalScale": 1.2,
+      "speed": 0.02,
+      "movement": "fish"
+    },
+    {
+      "name": "blue-tang",
+      "directory": "Fish/blue-tang",
+      "frames": 30,
+      "frameRate": 30,
+      "facesRight": false,
+      "nominalScale": 0.88,
+      "speed": 0.029,
+      "movement": "fish"
+    },
+    {
+      "name": "moorish-idol",
+      "directory": "Fish/moorish-idol",
+      "frames": 30,
+      "frameRate": 30,
+      "facesRight": true,
+      "nominalScale": 0.92,
+      "speed": 0.025,
+      "movement": "fish"
+    },
+    {
+      "name": "orange-butterflyfish",
+      "directory": "Fish/orange-butterflyfish",
+      "frames": 30,
+      "frameRate": 30,
+      "facesRight": true,
+      "nominalScale": 0.94,
+      "speed": 0.021,
+      "movement": "fish"
+    },
+    {
+      "name": "clown-triggerfish",
+      "directory": "Fish/clown-triggerfish",
+      "frames": 40,
+      "frameRate": 30,
+      "facesRight": false,
+      "nominalScale": 0.88,
+      "speed": 0.023,
+      "movement": "fish"
+    }
+  ],
+  "reef": {
+    "left": "Reef/reef-left.png",
+    "right": "Reef/reef-right.png"
+  },
+  "bubbles": [
+    "Bubbles/bubble-12.png",
+    "Bubbles/bubble-18.png",
+    "Bubbles/bubble-26.png",
+    "Bubbles/bubble-36.png",
+    "Bubbles/bubble-52.png"
+  ]
+}

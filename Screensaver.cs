@@ -7,32 +7,106 @@ using System.Windows.Forms;
 
 namespace AquariumSaver;
 
+// ── Logging ────────────────────────────────────────────────────────────────────
+
+internal static class AppLog
+{
+    private static readonly string LogPath =
+        Path.Combine(
+            Environment.GetFolderPath(
+                Environment.SpecialFolder.LocalApplicationData),
+            "AquariumSaver",
+            "AquariumSaver.log");
+
+    public static void Log(string message)
+    {
+        try
+        {
+            string? directory = Path.GetDirectoryName(LogPath);
+
+            if (!string.IsNullOrEmpty(directory))
+                Directory.CreateDirectory(directory);
+
+            File.AppendAllText(
+                LogPath,
+                $"{DateTime.Now:O} {message}{Environment.NewLine}");
+        }
+        catch
+        {
+            // Logging must never crash the screensaver.
+        }
+    }
+}
+
 // ── ExitWatcher — mouse/keyboard quit detection ────────────────────────────────
 
-public class ExitWatcher
+public sealed class ExitWatcher
 {
-    readonly Point _startPos;
+    private Point _startPos;
+    private readonly Stopwatch _startupClock = Stopwatch.StartNew();
+
+    private const int StartupGraceMilliseconds = 3000;
+    private const int MovementThresholdPixels = 80;
+
     public event EventHandler? Quit;
     public bool ShouldQuit { get; private set; }
 
-    public ExitWatcher() => _startPos = Cursor.Position;
-
-    public void AddQuit(EventHandler h) => Quit += h;
-    public void RemoveQuit(EventHandler h) => Quit -= h;
-
-    public bool Check(Point mousePos, bool keyPressed)
+    public ExitWatcher()
     {
-        if (ShouldQuit) return true;
-        if (keyPressed) { ShouldQuit = true; Quit?.Invoke(this, EventArgs.Empty); return true; }
-        var dx = mousePos.X - _startPos.X;
-        var dy = mousePos.Y - _startPos.Y;
-        if (dx * dx + dy * dy > 64) // 8px threshold²
+        _startPos = Cursor.Position;
+    }
+
+    public void AddQuit(EventHandler handler)
+    {
+        Quit += handler;
+    }
+
+    public void RemoveQuit(EventHandler handler)
+    {
+        Quit -= handler;
+    }
+
+    public bool Check(Point mousePosition, bool keyPressed)
+    {
+        if (ShouldQuit)
+            return true;
+
+        if (_startupClock.ElapsedMilliseconds < StartupGraceMilliseconds)
         {
-            ShouldQuit = true;
-            Quit?.Invoke(this, EventArgs.Empty);
+            // Ignore pointer movement caused by form activation,
+            // monitor switching, or initial cursor settling.
+            _startPos = mousePosition;
+            return false;
+        }
+
+        if (keyPressed)
+        {
+            RequestQuit();
             return true;
         }
+
+        long dx = mousePosition.X - _startPos.X;
+        long dy = mousePosition.Y - _startPos.Y;
+
+        long thresholdSquared =
+            MovementThresholdPixels * MovementThresholdPixels;
+
+        if (dx * dx + dy * dy > thresholdSquared)
+        {
+            RequestQuit();
+            return true;
+        }
+
         return false;
+    }
+
+    private void RequestQuit()
+    {
+        if (ShouldQuit)
+            return;
+
+        ShouldQuit = true;
+        Quit?.Invoke(this, EventArgs.Empty);
     }
 }
 
@@ -45,13 +119,27 @@ public class ScreensaverForm : Form
     readonly int _seed;
     readonly SettingsData _settings;
     System.Windows.Forms.Timer? _renderTimer;
+    System.Windows.Forms.Timer? _displayChangeTimer;
     readonly Stopwatch _renderClock = new();
     double _lastRenderTime;
     volatile bool _closing;
     Scene? _scene;
-    Bitmap? _backBuffer;
-    Graphics? _backGraphics;
+
+    // ── Double-buffered publication ──
+    // One bitmap is the last successfully completed frame (front).
+    // The other is the hidden render target. A failed draw is never presented.
+    Bitmap? _bufferA;
+    Bitmap? _bufferB;
+    Graphics? _graphicsA;
+    Graphics? _graphicsB;
+    bool _frontIsA;
+
+    private Bitmap? FrontBuffer => _frontIsA ? _bufferA : _bufferB;
+    private Graphics? RenderGraphics => _frontIsA ? _graphicsB : _graphicsA;
+
     Size _clientSize;
+    bool _loaded;
+    bool _rebuilding;
 
     public ScreensaverForm(Screen? screen, ExitWatcher? exitWatcher, int seed, SettingsData settings)
     {
@@ -67,7 +155,18 @@ public class ScreensaverForm : Form
             StartPosition = FormStartPosition.Manual;
             Bounds = screen.Bounds;
         }
-        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
+        BackColor = Color.Black;
+
+        SetStyle(
+            ControlStyles.UserPaint |
+            ControlStyles.AllPaintingInWmPaint |
+            ControlStyles.OptimizedDoubleBuffer |
+            ControlStyles.Opaque |
+            ControlStyles.ResizeRedraw,
+            true);
+
+        UpdateStyles();
+
         _exitWatcher?.AddQuit(OnQuit);
     }
 
@@ -75,18 +174,16 @@ public class ScreensaverForm : Form
     {
         base.OnLoad(e);
 
-        InitScene();
+        _loaded = true;
 
-        // Draw the first complete frame before allowing Windows to paint.
-        _scene?.Update(0.0);
-        _scene?.Draw(_backGraphics!, _clientSize);
+        InitScene();
 
         int targetFps = Math.Clamp(
             _settings.TargetFps > 0
                 ? _settings.TargetFps
-                : DetectRefreshRate(),
+                : DetectRefreshRate(_screen),
             30,
-            120);
+            240);
 
         _renderClock.Restart();
         _lastRenderTime = _renderClock.Elapsed.TotalSeconds;
@@ -98,54 +195,117 @@ public class ScreensaverForm : Form
 
         _renderTimer.Tick += RenderTimerTick;
         _renderTimer.Start();
+
+        Invalidate();
     }
+
+    private int _consecutiveRenderFailures;
+    private DateTime _lastRenderFailureLog = DateTime.MinValue;
 
     private void RenderTimerTick(object? sender, EventArgs e)
     {
         if (_closing ||
             IsDisposed ||
             _scene == null ||
-            _backGraphics == null ||
-            _backBuffer == null)
+            FrontBuffer == null ||
+            RenderGraphics == null)
         {
             return;
         }
 
-        double now = _renderClock.Elapsed.TotalSeconds;
-        double elapsed = Math.Clamp(
-            now - _lastRenderTime,
-            0.0,
-            0.05);
+        double now =
+            _renderClock.Elapsed.TotalSeconds;
+
+        double elapsed =
+            Math.Clamp(
+                now - _lastRenderTime,
+                0.0,
+                0.05);
 
         _lastRenderTime = now;
 
-        // Timer Tick and OnPaint both execute on the UI thread.
-        // OnPaint therefore cannot copy a partially rendered bitmap.
-        _scene.Update(elapsed);
-        _scene.Draw(_backGraphics, _clientSize);
+        try
+        {
+            _scene.Update(elapsed);
 
-        Invalidate();
+            /*
+             * Draw only into the hidden buffer. Scene.Draw() may clear or
+             * partially modify it without affecting the visible frame.
+             */
+            Graphics renderGraphics =
+                RenderGraphics;
+
+            _scene.Draw(
+                renderGraphics,
+                _clientSize);
+
+            /*
+             * Publish only after the complete frame succeeds.
+             * Timer Tick and OnPaint run on the same UI thread, so this
+             * boolean swap is safe.
+             */
+            _frontIsA = !_frontIsA;
+
+            _consecutiveRenderFailures = 0;
+
+            Invalidate();
+        }
+        catch (Exception exception)
+        {
+            _consecutiveRenderFailures++;
+
+            /*
+             * Avoid writing the same large exception hundreds of times per
+             * second, but retain enough information to diagnose the failure.
+             */
+            if ((DateTime.UtcNow - _lastRenderFailureLog)
+                    .TotalSeconds >= 1.0)
+            {
+                _lastRenderFailureLog =
+                    DateTime.UtcNow;
+
+                AppLog.Log(
+                    $"Render failure #{_consecutiveRenderFailures}:" +
+                    Environment.NewLine +
+                    exception);
+            }
+
+            /*
+             * Do not swap buffers.
+             * Do not call InitScene().
+             * Do not invalidate.
+             *
+             * The last successfully completed frame remains visible.
+             */
+            if (_consecutiveRenderFailures >= 300)
+            {
+                AppLog.Log(
+                    "Rendering suspended after 300 consecutive failures.");
+
+                _renderTimer?.Stop();
+            }
+        }
     }
 
     /// <summary>
-    /// Detect the primary display refresh rate, clamped to 30-120hz.
+    /// Detect the specified monitor's refresh rate, clamped to 30-240hz.
     /// Falls back to 60hz if detection fails.
+    /// Uses the form's own screen, not always the primary monitor.
     /// </summary>
-    static int DetectRefreshRate()
+    static int DetectRefreshRate(Screen? screen)
     {
         try
         {
-            var screen = Screen.PrimaryScreen;
+            screen ??= Screen.PrimaryScreen;
             if (screen != null)
             {
-                // Use the device mode to query refresh rate.
                 var dm = new DevMode
                 {
-                    dmSize = (short)Marshal.SizeOf(typeof(DevMode))
+                    dmSize = (short)Marshal.SizeOf<DevMode>()
                 };
                 if (EnumDisplaySettings(screen.DeviceName, -1, ref dm) && dm.dmDisplayFrequency > 0)
                 {
-                    return Math.Clamp((int)dm.dmDisplayFrequency, 30, 120);
+                    return Math.Clamp((int)dm.dmDisplayFrequency, 30, 240);
                 }
             }
         }
@@ -189,14 +349,10 @@ public class ScreensaverForm : Form
 
     private void InitScene()
     {
-        _backGraphics?.Dispose();
-        _backGraphics = null;
-
-        _backBuffer?.Dispose();
-        _backBuffer = null;
-
         _scene?.Dispose();
         _scene = null;
+
+        DisposeRenderResources();
 
         _clientSize = new Size(
             Math.Max(1, ClientSize.Width),
@@ -220,99 +376,221 @@ public class ScreensaverForm : Form
                 _clientSize);
         }
 
-        _backBuffer = new Bitmap(
-            _clientSize.Width,
-            _clientSize.Height,
+        CreateRenderResources(_clientSize);
+
+        /*
+         * Render into buffer B. Buffer A remains the opaque black fallback.
+         * Publish B only if the entire draw succeeds.
+         */
+        _scene.Update(0.0);
+        _scene.Draw(_graphicsB!, _clientSize);
+
+        _frontIsA = false;
+    }
+
+    private void DisposeRenderResources()
+    {
+        // Graphics must be disposed before their bitmaps.
+        _graphicsA?.Dispose();
+        _graphicsA = null;
+
+        _graphicsB?.Dispose();
+        _graphicsB = null;
+
+        _bufferA?.Dispose();
+        _bufferA = null;
+
+        _bufferB?.Dispose();
+        _bufferB = null;
+    }
+
+    private static void ConfigureGraphics(Graphics graphics)
+    {
+        graphics.CompositingMode =
+            CompositingMode.SourceOver;
+
+        graphics.CompositingQuality =
+            CompositingQuality.HighSpeed;
+
+        graphics.InterpolationMode =
+            InterpolationMode.HighQualityBilinear;
+
+        graphics.PixelOffsetMode =
+            PixelOffsetMode.HighQuality;
+
+        graphics.SmoothingMode =
+            SmoothingMode.None;
+    }
+
+    private void CreateRenderResources(Size size)
+    {
+        DisposeRenderResources();
+
+        _bufferA = new Bitmap(
+            size.Width,
+            size.Height,
             PixelFormat.Format32bppPArgb);
 
-        _backGraphics = Graphics.FromImage(_backBuffer);
+        _bufferB = new Bitmap(
+            size.Width,
+            size.Height,
+            PixelFormat.Format32bppPArgb);
 
-        _backGraphics.SmoothingMode = SmoothingMode.AntiAlias;
-        _backGraphics.InterpolationMode = InterpolationMode.HighQualityBilinear;
-        _backGraphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        _graphicsA = Graphics.FromImage(_bufferA);
+        _graphicsB = Graphics.FromImage(_bufferB);
 
-        // Make sure the first buffer is a complete scene rather than
-        // an uninitialized black bitmap.
-        _scene.Draw(_backGraphics, _clientSize);
+        ConfigureGraphics(_graphicsA);
+        ConfigureGraphics(_graphicsB);
+
+        // Establish safe opaque contents in both buffers.
+        _graphicsA.CompositingMode = CompositingMode.SourceCopy;
+        _graphicsA.Clear(Color.Black);
+        _graphicsA.CompositingMode = CompositingMode.SourceOver;
+
+        _graphicsB.CompositingMode = CompositingMode.SourceCopy;
+        _graphicsB.Clear(Color.Black);
+        _graphicsB.CompositingMode = CompositingMode.SourceOver;
+
+        _frontIsA = true;
     }
 
     protected override void OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
 
-        if (!IsHandleCreated ||
+        if (!_loaded ||
+            _closing ||
+            _rebuilding ||
+            !IsHandleCreated ||
             ClientSize.Width <= 0 ||
             ClientSize.Height <= 0)
         {
             return;
         }
 
-        _backGraphics?.Dispose();
-        _backGraphics = null;
+        Size newSize = ClientSize;
 
-        _backBuffer?.Dispose();
-        _backBuffer = null;
-
-        _scene?.Dispose();
-        _scene = null;
-
-        _clientSize = ClientSize;
-
-        if (_screen != null)
+        if (newSize == _clientSize)
         {
-            _scene = new Scene(
-                _seed,
-                _settings,
-                _clientSize,
-                _screen.Bounds);
-        }
-        else
-        {
-            _scene = new Scene(
-                _seed,
-                _settings,
-                _clientSize);
+            return;
         }
 
-        _backBuffer = new Bitmap(
-            _clientSize.Width,
-            _clientSize.Height,
-            PixelFormat.Format32bppPArgb);
+        RebuildSceneSafely("client size changed");
+    }
 
-        _backGraphics = Graphics.FromImage(_backBuffer);
+    private void RebuildSceneSafely(string reason)
+    {
+        if (_closing ||
+            _rebuilding ||
+            IsDisposed)
+        {
+            return;
+        }
 
-        _backGraphics.SmoothingMode = SmoothingMode.AntiAlias;
-        _backGraphics.InterpolationMode = InterpolationMode.HighQualityBilinear;
-        _backGraphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        _rebuilding = true;
 
-        // Immediately initialize the new buffer.
-        _scene.Draw(_backGraphics, _clientSize);
+        bool timerWasRunning =
+            _renderTimer?.Enabled == true;
 
-        Invalidate();
+        try
+        {
+            _renderTimer?.Stop();
+
+            AppLog.Log(
+                $"Rebuilding scene: {reason}.");
+
+            InitScene();
+
+            _lastRenderTime =
+                _renderClock.Elapsed.TotalSeconds;
+
+            _consecutiveRenderFailures = 0;
+
+            Invalidate();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Log(
+                $"Scene rebuild failed ({reason}):" +
+                Environment.NewLine +
+                exception);
+        }
+        finally
+        {
+            _rebuilding = false;
+
+            if (timerWasRunning &&
+                !_closing &&
+                !IsDisposed)
+            {
+                _renderTimer?.Start();
+            }
+        }
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
     {
-        // The complete back buffer covers the client area — no erase needed.
+        // OnPaint paints the entire opaque client area.
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        if (_backBuffer != null)
+        Bitmap? completedFrame = FrontBuffer;
+
+        if (completedFrame == null)
         {
-            e.Graphics.DrawImageUnscaled(_backBuffer, 0, 0);
+            e.Graphics.Clear(Color.Black);
+            return;
         }
+
+        e.Graphics.ResetTransform();
+        e.Graphics.ResetClip();
+
+        /*
+         * The frame is opaque and covers the entire client area.
+         * Copy it directly without first exposing a black intermediate image.
+         */
+        e.Graphics.CompositingMode =
+            CompositingMode.SourceCopy;
+
+        e.Graphics.DrawImageUnscaled(
+            completedFrame,
+            0,
+            0);
     }
 
     protected override void WndProc(ref Message m)
     {
         if (m.Msg == Native.WM_DISPLAYCHANGE)
         {
-            if (!_closing) { _closing = true; _renderTimer?.Stop(); Application.Exit(); }
+            AppLog.Log(
+                "WM_DISPLAYCHANGE received; scheduling rebuild.");
+
+            _displayChangeTimer ??=
+                new System.Windows.Forms.Timer
+                {
+                    Interval = 750
+                };
+
+            _displayChangeTimer.Stop();
+            _displayChangeTimer.Tick -=
+                DisplayChangeTimerTick;
+
+            _displayChangeTimer.Tick +=
+                DisplayChangeTimerTick;
+
+            _displayChangeTimer.Start();
+
+            m.Result = IntPtr.Zero;
+            return;
         }
-        else if (m.Msg is 0x0200 or 0x0201 or 0x0204 or 0x0207 or 0x0100 or 0x0101)
+        else if (m.Msg is
+                 0x0201 or // left button
+                 0x0204 or // right button
+                 0x0207 or // middle button
+                 0x0100)   // key down
         {
-            var keyPressed = m.Msg is 0x0100 or 0x0101;
+            var keyPressed = m.Msg is 0x0100;
             if (_exitWatcher != null && _exitWatcher.Check(Cursor.Position, keyPressed))
             { OnQuit(null, EventArgs.Empty); return; }
         }
@@ -322,14 +600,68 @@ public class ScreensaverForm : Form
     private void OnQuit(object? sender, EventArgs e)
     {
         if (_closing)
+        {
             return;
+        }
+
+        AppLog.Log(
+            $"Intentional shutdown requested. " +
+            $"Cursor={CursorPositionString()}");
 
         _closing = true;
 
         _renderTimer?.Stop();
+        _displayChangeTimer?.Stop();
+
         _exitWatcher?.RemoveQuit(OnQuit);
 
         Application.Exit();
+    }
+
+    private static string CursorPositionString()
+    {
+        try
+        {
+            var p = Cursor.Position;
+            return $"({p.X},{p.Y})";
+        }
+        catch
+        {
+            return "unknown";
+        }
+    }
+
+    private void DisplayChangeTimerTick(
+        object? sender,
+        EventArgs e)
+    {
+        _displayChangeTimer?.Stop();
+
+        RebuildSceneSafely(
+            "display configuration changed");
+    }
+
+    protected override void OnFormClosing(
+        FormClosingEventArgs e)
+    {
+        AppLog.Log(
+            $"ScreensaverForm closing. " +
+            $"Reason={e.CloseReason}, " +
+            $"ClosingFlag={_closing}, " +
+            $"RenderFailures={_consecutiveRenderFailures}.");
+
+        base.OnFormClosing(e);
+    }
+
+    protected override void OnHandleDestroyed(
+        EventArgs e)
+    {
+        AppLog.Log(
+            $"ScreensaverForm handle destroyed. " +
+            $"RecreatingHandle={RecreatingHandle}, " +
+            $"Disposed={IsDisposed}.");
+
+        base.OnHandleDestroyed(e);
     }
 
     protected override void Dispose(bool disposing)
@@ -341,20 +673,28 @@ public class ScreensaverForm : Form
             if (_renderTimer != null)
             {
                 _renderTimer.Stop();
+                _renderTimer.Tick -=
+                    RenderTimerTick;
+
                 _renderTimer.Dispose();
                 _renderTimer = null;
+            }
+
+            if (_displayChangeTimer != null)
+            {
+                _displayChangeTimer.Stop();
+                _displayChangeTimer.Tick -=
+                    DisplayChangeTimerTick;
+
+                _displayChangeTimer.Dispose();
+                _displayChangeTimer = null;
             }
 
             _renderClock.Stop();
 
             _exitWatcher?.RemoveQuit(OnQuit);
 
-            // Graphics must be disposed before the bitmap it targets.
-            _backGraphics?.Dispose();
-            _backGraphics = null;
-
-            _backBuffer?.Dispose();
-            _backBuffer = null;
+            DisposeRenderResources();
 
             _scene?.Dispose();
             _scene = null;
@@ -391,7 +731,12 @@ public class PreviewForm : Form
         { Width = rect.Width; Height = rect.Height; }
 
         ShowInTaskbar = false;
-        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
+        BackColor = Color.Black;
+        SetStyle(
+            ControlStyles.AllPaintingInWmPaint |
+            ControlStyles.UserPaint |
+            ControlStyles.Opaque,
+            true);
     }
 
     protected override void OnLoad(EventArgs e)
@@ -424,24 +769,45 @@ public class PreviewForm : Form
         _parentCheck.Start();
     }
 
-    protected override void OnPaintBackground(PaintEventArgs e) { }
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        // OnPaint paints the entire opaque client area.
+    }
 
     protected override void OnPaint(PaintEventArgs e)
     {
+        e.Graphics.Clear(Color.Black);
+
         if (_scene == null || _backGraphics == null || _backBuffer == null) return;
         _scene.Update(1.0 / 30.0);
         _scene.Draw(_backGraphics, ClientSize);
+        e.Graphics.CompositingMode = CompositingMode.SourceOver;
         e.Graphics.DrawImageUnscaled(_backBuffer, 0, 0);
     }
 
     protected override void OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
-        _backBuffer?.Dispose(); _backGraphics?.Dispose();
+
+        if (ClientSize.Width <= 0 ||
+            ClientSize.Height <= 0)
+        {
+            return;
+        }
+
+        _backGraphics?.Dispose();
+        _backGraphics = null;
+
+        _backBuffer?.Dispose();
+        _backBuffer = null;
+
+        _scene?.Dispose();
+        _scene = null;
+
         _backBuffer = new Bitmap(ClientSize.Width, ClientSize.Height);
         _backGraphics = Graphics.FromImage(_backBuffer);
         _backGraphics.SmoothingMode = SmoothingMode.AntiAlias;
-        _scene?.Dispose();
+
         _scene = new Scene(42, new SettingsData { FishCount = Math.Max(2, Math.Min(3, _settings.FishCount)),
             BubbleDensity = Math.Max(5, Math.Min(20, _settings.BubbleDensity)),
             ShowSeaweed = _settings.ShowSeaweed, ShowLightShafts = false, ShowBackgroundChest = false,
@@ -537,7 +903,7 @@ public class ConfigForm : Form
 
         AddLabel(xL, y, "Target FPS:");
         _cmbFps = new ComboBox { Location = new Point(xR, y + 1), DropDownStyle = ComboBoxStyle.DropDownList, Width = 60 };
-        _cmbFps.Items.AddRange(new object[] { "30", "60", "120" });
+        _cmbFps.Items.AddRange(new object[] { "Auto", "30", "50", "60", "100", "120" });
         Controls.Add(_cmbFps);
         y += rh + 12;
 
@@ -589,7 +955,9 @@ public class ConfigForm : Form
         _chkChest.Checked = _settings.ShowBackgroundChest;
         _chkIndependent.Checked = _settings.IndependentScenesPerMonitor;
         _chkBattery.Checked = _settings.PauseOnBattery;
-        _cmbFps.SelectedItem = _settings.TargetFps.ToString();
+        _cmbFps.SelectedItem = _settings.TargetFps <= 0
+            ? "Auto"
+            : _settings.TargetFps.ToString();
 
         UpdateColorBtn(true);
         UpdateColorBtn(false);
@@ -603,8 +971,7 @@ public class ConfigForm : Form
         var lbl = top ? _lblTopColor : _lblBottomColor;
         try
         {
-            var c = _settings.GetTopColor(); // or GetBottomColor
-            c = top ? _settings.GetTopColor() : _settings.GetBottomColor();
+            var c = top ? _settings.GetTopColor() : _settings.GetBottomColor();
             btn.BackColor = c;
             lbl.Text = hex;
         }
@@ -669,7 +1036,10 @@ public class ConfigForm : Form
             _settings.ShowBackgroundChest = _chkChest.Checked;
             _settings.IndependentScenesPerMonitor = _chkIndependent.Checked;
             _settings.PauseOnBattery = _chkBattery.Checked;
-            if (int.TryParse(_cmbFps.SelectedItem?.ToString(), out var fps)) _settings.TargetFps = fps;
+            string selectedFps = _cmbFps.SelectedItem?.ToString() ?? "Auto";
+            _settings.TargetFps = selectedFps == "Auto"
+                ? 0
+                : int.Parse(selectedFps);
             Settings.Save(_settings.Clamp());
         }
         base.OnFormClosing(e);

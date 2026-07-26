@@ -11,7 +11,7 @@ public sealed class SettingsData
     public const int FishCountMin = 1, FishCountMax = 60;
     public const int BubbleDensityMin = 0, BubbleDensityMax = 200;
     public const float SpeedMultiplierMin = 0.25f, SpeedMultiplierMax = 3.0f;
-    public static readonly int[] AllowedFpsValues = [30, 60, 120];
+    public static readonly int[] AllowedFpsValues = [30, 50, 60, 100, 120];
 
     // Defaults (Win95 underwater)
     public const int DefaultFishCount = 12;
@@ -23,7 +23,7 @@ public sealed class SettingsData
     public const bool DefaultIndependentScenesPerMonitor = true;
     public const string DefaultBackgroundTopColor = "#FF001845";   // deep blue
     public const string DefaultBackgroundBottomColor = "#FF000208"; // near-black
-    public const int DefaultTargetFps = 60;
+    public const int DefaultTargetFps = 0; // 0 = Auto (detect monitor refresh rate)
     public const bool DefaultPauseOnBattery = false;
 
     public static SettingsData Defaults => new();
@@ -45,7 +45,9 @@ public sealed class SettingsData
         FishCount = Math.Clamp(FishCount, FishCountMin, FishCountMax);
         BubbleDensity = Math.Clamp(BubbleDensity, BubbleDensityMin, BubbleDensityMax);
         SpeedMultiplier = Math.Clamp(SpeedMultiplier, SpeedMultiplierMin, SpeedMultiplierMax);
-        TargetFps = AllowedFpsValues.OrderBy(v => Math.Abs(v - TargetFps)).First();
+        // 0 = Auto; otherwise snap to nearest allowed value
+        if (TargetFps > 0)
+            TargetFps = AllowedFpsValues.OrderBy(v => Math.Abs(v - TargetFps)).First();
         if (string.IsNullOrWhiteSpace(BackgroundTopColor)) BackgroundTopColor = DefaultBackgroundTopColor;
         if (string.IsNullOrWhiteSpace(BackgroundBottomColor)) BackgroundBottomColor = DefaultBackgroundBottomColor;
         return this;
