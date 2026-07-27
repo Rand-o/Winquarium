@@ -12,4 +12,4 @@ Animation method:
 - Whole-silhouette stingray wing stroke and delayed tip curl.
 - Transparent padding keeps all animated poses aligned.
 
-The generator does not modify white.png.
+The generator does not modify sprites.png.

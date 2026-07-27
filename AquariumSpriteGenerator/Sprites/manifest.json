@@ -11,8 +11,8 @@
       "directory": "Fish/yellow-butterflyfish",
       "frames": 30,
       "frameRate": 30,
-      "facesRight": false,
-      "nominalScale": 0.84,
+      "facesRight": true,
+      "nominalScale": 0.85,
       "speed": 0.024,
       "movement": "fish"
     },
@@ -21,8 +21,8 @@
       "directory": "Fish/stingray",
       "frames": 40,
       "frameRate": 30,
-      "facesRight": true,
-      "nominalScale": 1.15,
+      "facesRight": false,
+      "nominalScale": 0.85,
       "speed": 0.014,
       "movement": "stingray"
     },
@@ -32,7 +32,7 @@
       "frames": 40,
       "frameRate": 30,
       "facesRight": true,
-      "nominalScale": 1.2,
+      "nominalScale": 1.3,
       "speed": 0.02,
       "movement": "fish"
     },
@@ -42,7 +42,7 @@
       "frames": 30,
       "frameRate": 30,
       "facesRight": false,
-      "nominalScale": 0.88,
+      "nominalScale": 1.1,
       "speed": 0.029,
       "movement": "fish"
     },
@@ -52,7 +52,7 @@
       "frames": 30,
       "frameRate": 30,
       "facesRight": true,
-      "nominalScale": 0.92,
+      "nominalScale": 1.1,
       "speed": 0.025,
       "movement": "fish"
     },
@@ -62,7 +62,7 @@
       "frames": 30,
       "frameRate": 30,
       "facesRight": true,
-      "nominalScale": 0.94,
+      "nominalScale": 0.88,
       "speed": 0.021,
       "movement": "fish"
     },
@@ -72,7 +72,7 @@
       "frames": 40,
       "frameRate": 30,
       "facesRight": false,
-      "nominalScale": 0.88,
+      "nominalScale": 1.3,
       "speed": 0.023,
       "movement": "fish"
     }

@@ -8,6 +8,7 @@ A Windows screensaver (`.scr`) rendering an animated underwater aquarium with sp
 - **Double-buffered rendering** — front/back buffer swap ensures a failed draw is never presented; last successful frame remains visible
 - **Static background caching** — water gradient and reef corners are rendered once per client size and reused every frame
 - **Depth-sorted rendering** — fish at different depths with parallax-like speed and opacity variation
+- **Variable swim angles** — each fish follows a unique diagonal path with angles up to ±15° for natural upward and downward movement
 - **4 bubble streams** — burst-based rising from left and right reef corners with per-bubble sway, growth, and opacity fade
 - **Multi-monitor support** — each monitor shows a viewport into one shared virtual-desktop aquarium; simulation time is derived from a single process-wide stopwatch so all monitors display the same moment
 - **Auto refresh-rate detection** — detects display refresh rate per-monitor via `EnumDisplaySettings`, with user-overridable `TargetFps` setting (Auto / 30 / 50 / 60 / 100 / 120)

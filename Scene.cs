@@ -277,22 +277,21 @@ internal sealed class SharedAquarium
         // Sort fish by depth once after construction — avoids per-frame LINQ allocation.
         Array.Sort(_fish, static (left, right) => left.Depth.CompareTo(right.Depth));
 
-        // Exactly 4 bubble streams: 2 left reef, 2 right reef.
-        // Each stream spawns from the middle of its reef and floats to the top.
+        // Exactly 4 bubble streams: 2 bottom-left corner, 2 bottom-right corner.
         // Burst-based: a few bubbles appear, float up, then a pause before the next burst.
         _bubbleStreams = new BubbleStream[4];
-        // Left reef streams — X near the center of the left reef (reef width ~8% of screen, center ~4%)
-        _bubbleStreams[0] = new BubbleStream(0.03f + random.NextSingle() * 0.02f, 0.74f + random.NextSingle() * 0.04f,
+        // Bottom-left streams
+        _bubbleStreams[0] = new BubbleStream(0.02f + random.NextSingle() * 0.06f, 0.80f + random.NextSingle() * 0.08f,
             1.0f, random.NextSingle() * 20f, 3 + random.Next(3),
             burstInterval: 2.5f + random.NextSingle() * 2.0f, bubblesPerBurst: 3 + random.Next(3));
-        _bubbleStreams[1] = new BubbleStream(0.05f + random.NextSingle() * 0.02f, 0.72f + random.NextSingle() * 0.06f,
+        _bubbleStreams[1] = new BubbleStream(0.01f + random.NextSingle() * 0.07f, 0.78f + random.NextSingle() * 0.10f,
             1.0f, random.NextSingle() * 20f, 3 + random.Next(3),
             burstInterval: 3.0f + random.NextSingle() * 2.0f, bubblesPerBurst: 3 + random.Next(3));
-        // Right reef streams — X near the center of the right reef (reef width ~8% of screen, center ~96%)
-        _bubbleStreams[2] = new BubbleStream(0.93f + random.NextSingle() * 0.02f, 0.72f + random.NextSingle() * 0.06f,
+        // Bottom-right streams
+        _bubbleStreams[2] = new BubbleStream(0.92f + random.NextSingle() * 0.06f, 0.80f + random.NextSingle() * 0.08f,
             1.0f, random.NextSingle() * 20f, 3 + random.Next(3),
             burstInterval: 2.5f + random.NextSingle() * 2.0f, bubblesPerBurst: 3 + random.Next(3));
-        _bubbleStreams[3] = new BubbleStream(0.91f + random.NextSingle() * 0.02f, 0.74f + random.NextSingle() * 0.04f,
+        _bubbleStreams[3] = new BubbleStream(0.91f + random.NextSingle() * 0.07f, 0.78f + random.NextSingle() * 0.10f,
             1.0f, random.NextSingle() * 20f, 3 + random.Next(3),
             burstInterval: 3.0f + random.NextSingle() * 2.0f, bubblesPerBurst: 3 + random.Next(3));
     }
@@ -323,7 +322,7 @@ internal sealed class SharedAquarium
 
         DrawFishLayer(graphics, virtualBounds, viewportScale, time, rearLayer: true);
         DrawFishLayer(graphics, virtualBounds, viewportScale, time, rearLayer: false);
-        DrawBubbles(graphics, virtualBounds, viewportScale, time);
+        DrawBubbles(graphics, viewportBounds, viewportScale, time);
     }
 
     // ── Public static background drawing methods ──
@@ -396,7 +395,7 @@ internal sealed class SharedAquarium
 
             bool movesRight = r0 < 0.5f;
             float baseY = 0.10f + r1 * 0.55f;
-            float yDrift = (r2 - 0.5f) * 0.18f;
+            float yDrift = (r2 - 0.5f) * 0.95f;
 
             FishSpriteSet species = atlas.GetSpecies(fish.Species);
             float margin = species.IsStingray ? 0.19f : 0.14f;

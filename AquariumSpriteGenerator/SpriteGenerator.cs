@@ -24,23 +24,38 @@ internal static class Program
     [
         new(
             Name: "yellow-butterflyfish",
-            SourceBounds: new Rectangle(218, 152, 154, 94),
+            SourceBounds: new Rectangle(214, 146, 164, 112),
             FacesRight: true,
-            NominalScale: 1.15f,
+            NominalScale: 0.85f,
             Speed: 0.024f,
             Style: AnimationStyle.NormalFish,
             FrameCount: 30,
-            TailHingeX: 29f,
+            TailHingeX: 33f,
             TailAmplitude: 7f,
             TailCompression: 0.14f,
             BodyFlex: 1.2f,
-            SideFin: null),
+            SideFin: Fin(
+                pivotX: 102f,
+                pivotY: 67f,
+                maximumAngle: 35f,
+                points: new[]
+                {
+                    P(98f, 63f),
+                    P(106f, 59f),
+                    P(116f, 61f),
+                    P(122f, 67f),
+                    P(118f, 75f),
+                    P(108f, 79f),
+                    P(100f, 75f)
+                })),
+
+
 
         new(
             Name: "stingray",
             SourceBounds: new Rectangle(511, 53, 226, 108),
             FacesRight: false,
-            NominalScale: 1.25f,
+            NominalScale: 0.85f,
             Speed: 0.014f,
             Style: AnimationStyle.Stingray,
             FrameCount: 40,
@@ -54,7 +69,7 @@ internal static class Program
             Name: "blue-triggerfish",
             SourceBounds: new Rectangle(538, 190, 238, 172),
             FacesRight: true,
-            NominalScale: 1.20f,
+            NominalScale: 1.30f,
             Speed: 0.020f,
             Style: AnimationStyle.Triggerfish,
             FrameCount: 40,
@@ -62,13 +77,26 @@ internal static class Program
             TailAmplitude: 8f,
             TailCompression: 0.16f,
             BodyFlex: 1.8f,
-            SideFin: null),
+            SideFin: Fin(
+                pivotX: 122f,
+                pivotY: 102f,
+                maximumAngle: 35f,
+                points: new[]
+                {
+                    P(118f, 98f),
+                    P(126f, 94f),
+                    P(136f, 96f),
+                    P(142f, 102f),
+                    P(138f, 110f),
+                    P(128f, 114f),
+                    P(120f, 110f)
+                })),
 
         new(
             Name: "blue-tang",
             SourceBounds: new Rectangle(992, 201, 164, 96),
             FacesRight: false,
-            NominalScale: 1.12f,
+            NominalScale: 1.10f,
             Speed: 0.029f,
             Style: AnimationStyle.NormalFish,
             FrameCount: 30,
@@ -76,13 +104,28 @@ internal static class Program
             TailAmplitude: 7f,
             TailCompression: 0.15f,
             BodyFlex: 1.2f,
-            SideFin: null),
+            SideFin: Fin(
+                pivotX: 47f,
+                pivotY: 37f,
+                maximumAngle: 35f,
+                points: new[]
+                {
+                    P(43f, 33f),
+                    P(51f, 29f),
+                    P(61f, 31f),
+                    P(67f, 37f),
+                    P(63f, 45f),
+                    P(53f, 49f),
+                    P(45f, 45f)
+                })),
+
+
 
         new(
             Name: "moorish-idol",
             SourceBounds: new Rectangle(333, 293, 194, 134),
             FacesRight: true,
-            NominalScale: 1.15f,
+            NominalScale: 1.10f,
             Speed: 0.025f,
             Style: AnimationStyle.NormalFish,
             FrameCount: 30,
@@ -90,13 +133,28 @@ internal static class Program
             TailAmplitude: 7f,
             TailCompression: 0.15f,
             BodyFlex: 1.4f,
-            SideFin: null),
+            SideFin: Fin(
+                pivotX: 117f,
+                pivotY: 50f,
+                maximumAngle: 35f,
+                points: new[]
+                {
+                    P(113f, 46f),
+                    P(121f, 42f),
+                    P(131f, 44f),
+                    P(137f, 50f),
+                    P(133f, 58f),
+                    P(123f, 62f),
+                    P(115f, 58f)
+                })),
+
+
 
         new(
             Name: "orange-butterflyfish",
             SourceBounds: new Rectangle(596, 387, 172, 108),
             FacesRight: true,
-            NominalScale: 1.15f,
+            NominalScale: 0.88f,
             Speed: 0.021f,
             Style: AnimationStyle.NormalFish,
             FrameCount: 30,
@@ -104,13 +162,28 @@ internal static class Program
             TailAmplitude: 7f,
             TailCompression: 0.15f,
             BodyFlex: 1.3f,
-            SideFin: null),
+            SideFin: Fin(
+                pivotX: 110f,
+                pivotY: 65f,
+                maximumAngle: 35f,
+                points: new[]
+                {
+                    P(106f, 61f),
+                    P(114f, 57f),
+                    P(124f, 59f),
+                    P(130f, 65f),
+                    P(126f, 73f),
+                    P(116f, 77f),
+                    P(108f, 73f)
+                })),
+
+
 
         new(
             Name: "clown-triggerfish",
             SourceBounds: new Rectangle(674, 500, 169, 91),
             FacesRight: false,
-            NominalScale: 1.13f,
+            NominalScale: 1.30f,
             Speed: 0.023f,
             Style: AnimationStyle.Triggerfish,
             FrameCount: 40,
@@ -224,7 +297,7 @@ internal static class Program
         PixelBuffer extracted = ExtractSubject(
             source,
             definition.SourceBounds,
-            keepLargestComponent: true);
+            ExtractionOptions.Fish);
 
         PixelBuffer? finLayer = null;
         PixelBuffer bodyLayer = extracted.Clone();
@@ -364,11 +437,15 @@ internal static class Program
         if (fin is not null &&
             definition.SideFin is not null)
         {
+            /*
+             * Pectoral fins beat faster than the body stroke.
+             * 2.5x the base phase gives a quick flutter.
+             */
             DrawFlappingFin(
                 result,
                 fin,
                 definition.SideFin,
-                phase + 0.35f);
+                phase * 2.5f + 0.35f);
         }
 
         return result;
@@ -686,30 +763,54 @@ internal static class Program
         PixelBuffer source,
         float phase)
     {
-        int outputWidth =
-            source.Width + FramePadding * 2;
+        int outputWidth = source.Width + FramePadding * 2;
+        int outputHeight = source.Height + FramePadding * 2;
 
-        int outputHeight =
-            source.Height + FramePadding * 2;
-
-        PixelBuffer output = new(
-            outputWidth,
-            outputHeight);
+        PixelBuffer output = new(outputWidth, outputHeight);
 
         /*
-         * The ray body is around the left half of this crop. The long thin
-         * tail extends to the right and should not flap like a second wing.
+         * Crop geometry (226 x 108), ray seen from above, facing left:
+         *
+         *   x ~0..30    head (eyes, snout)  -> fully static
+         *   x ~0..132   disc (diamond-shaped body with wings)
+         *   x ~132..226 tail whip
+         *   y ~52       disc horizontal centerline (spine)
+         *
+         * Stingrays swim by sending a traveling undulation wave through
+         * their pectoral fins (wings). From a top-down view:
+         *
+         *   1) The wave travels front-to-back along the disc
+         *   2) Wings flex UP (toward centerline) and DOWN (away from centerline)
+         *      in alternating phases — this is the "flap"
+         *   3) When a wing segment angles upward, it foreshortens horizontally
+         *      (compression along the disc axis)
+         *   4) The body centerline stays rigid; only the wings undulate
+         *   5) The tail whips with a phase-delayed traveling wave
+         *
+         * We use a forward warp: for each output pixel, compute where it
+         * came from in the source by inverting the deformation.
          */
-        const float bodyCenterX = 102f;
-        const float bodyCenterY = 63f;
-        const float wingEndX = 158f;
+        const float discCenterY = 52f;
+        const float headEndX = 30f;    // head is fully static left of this
+        const float headFadeX = 25f;   // motion ramps in over this span
+        const float tailStartX = 132f; // tail begins here
+        const float discStartX = 0f;   // wing phase spans the full disc
 
-        float stroke = MathF.Sin(phase);
+        // Wing span at front and back of the disc (half-height from centerline)
+        const float wingHalfSpanFront = 22f;
+        const float wingHalfSpanBack = 52f;
 
-        float projectedWingScale =
-            1f -
-            0.18f *
-            MathF.Abs(stroke);
+        // Wing flap parameters
+        const float wingAmplitude = 14f;  // max vertical displacement at wing tips
+        const float discWaveNumber = 2.8f; // radians of phase across the disc
+        const float wingCompression = 0.18f; // horizontal squeeze when wing is angled
+
+        // Tail whip parameters
+        const float tailAmplitude = 8f;
+        const float tailWaveLength = 5.0f;
+
+        // Gentle body bob — the whole disc dips slightly with each stroke
+        const float bodyBobAmplitude = 2.0f;
 
         for (int destinationY = 0;
              destinationY < outputHeight;
@@ -719,104 +820,144 @@ internal static class Program
                  destinationX < outputWidth;
                  destinationX++)
             {
-                float localX =
-                    destinationX - FramePadding;
+                float localX = destinationX - FramePadding;
+                float localY = destinationY - FramePadding;
 
-                float localY =
-                    destinationY - FramePadding;
-
-                float tailProtection = 1f -
-                    SmoothStep(
-                        Math.Clamp(
-                            (localX - 135f) /
-                            Math.Max(
-                                1f,
-                                wingEndX - 135f),
-                            0f,
-                            1f));
-
-                float horizontalDistance =
-                    MathF.Abs(
-                        localX - bodyCenterX);
-
-                float verticalDistance =
-                    MathF.Abs(
-                        localY - bodyCenterY);
-
-                float tipProgress =
+                /*
+                 * HEAD LOCK: 0 over the head, ramping to 1 behind it.
+                 * Everything is multiplied by this, so the head and eyes
+                 * are pixel-identical in every frame.
+                 */
+                float headProtect = SmoothStep(
                     Math.Clamp(
-                        horizontalDistance / 94f,
+                        (localX - headEndX) / headFadeX,
                         0f,
-                        1f);
-
-                float verticalWingProgress =
-                    Math.Clamp(
-                        verticalDistance / 54f,
-                        0f,
-                        1f);
-
-                float wingWeight =
-                    SmoothStep(
-                        tipProgress) *
-                    SmoothStep(
-                        verticalWingProgress) *
-                    tailProtection;
+                        1f));
 
                 /*
-                 * The apparent wing height contracts on the upstroke. Both
-                 * wings remain connected to the complete ray silhouette.
+                 * TAIL BLEND: 0 on the disc, 1 at the tail tip.
                  */
-                float scale =
-                    1f -
-                    (1f - projectedWingScale) *
-                    wingWeight;
+                float tailSpan = Math.Max(
+                    1f,
+                    source.Width - 1f - tailStartX);
 
-                scale = Math.Max(
-                    scale,
-                    0.70f);
+                float tailProgress = Math.Clamp(
+                    (localX - tailStartX) / tailSpan,
+                    0f,
+                    1f);
 
-                float sourceY =
-                    bodyCenterY +
-                    (localY - bodyCenterY) /
-                    scale;
+                float tailWeight = SmoothStep(tailProgress);
 
                 /*
-                 * A delayed wave travels from the center toward the broad
-                 * edges. Upper and lower edges curl in opposite directions.
+                 * DISC POSITION: normalized 0..1 front-to-back across the disc.
                  */
-                float delayedPhase =
-                    phase -
-                    tipProgress *
-                    1.35f;
-
-                float edgeDirection =
-                    localY < bodyCenterY
-                        ? -1f
-                        : 1f;
-
-                float curl =
-                    MathF.Sin(delayedPhase) *
-                    7f *
-                    wingWeight *
-                    edgeDirection;
-
-                sourceY -= curl;
+                float discSpan = Math.Max(1f, tailStartX - discStartX);
+                float localDiscProgress = Math.Clamp(
+                    (localX - discStartX) / discSpan,
+                    0f,
+                    1f);
 
                 /*
-                 * Very small fore/aft flex prevents the ray from looking
-                 * like a vertically scaled sticker.
+                 * WING MEMBERSHIP: vertical distance from the disc centerline.
+                 * 0 on the spine (no motion), 1 at the wing tips (full motion).
+                 *
+                 * The disc is diamond-shaped: narrow at the front, wide at the
+                 * back. Interpolate the wing half-span so the front of the lobes
+                 * gets the same envelope as the back.
                  */
-                float sourceX =
-                    localX -
+                float effectiveWingHalfSpan =
+                    wingHalfSpanFront +
+                    (wingHalfSpanBack - wingHalfSpanFront) *
+                    localDiscProgress;
+
+                float spanProgress = Math.Clamp(
+                    MathF.Abs(localY - discCenterY) /
+                    effectiveWingHalfSpan,
+                    0f,
+                    1f);
+
+                // Cubic envelope: spine stays stiff, outer wing gets full motion
+                float wingEnvelope =
+                    spanProgress *
+                    spanProgress *
+                    spanProgress;
+
+                /*
+                 * Which wing: +1 below the centerline, -1 above it.
+                 * This makes the two wings move symmetrically.
+                 */
+                float wingSign =
+                    localY >= discCenterY ? 1f : -1f;
+
+                /*
+                 * WING FLAP: a traveling wave moving front-to-back.
+                 *
+                 * The sin produces a smooth oscillation. At any given x position
+                 * along the disc, the wing goes up and down sinusoidally. The
+                 * wave travels because phase decreases with localDiscProgress.
+                 *
+                 * When the wing goes UP (angles toward the viewer from above),
+                 * it foreshortens — appearing narrower. This is the compression
+                 * effect. We apply it as a horizontal offset.
+                 */
+                float flapWave = MathF.Sin(
+                    phase - localDiscProgress * discWaveNumber);
+
+                // Vertical displacement: wings flex up/down from centerline
+                float wingOffsetY =
+                    flapWave *
+                    wingAmplitude *
+                    wingEnvelope *
+                    wingSign *
+                    headProtect;
+
+                // Horizontal compression: wing foreshortens when angled
+                // Positive flapWave = wing going up = compress toward centerline
+                float wingOffsetX =
+                    flapWave *
+                    wingCompression *
+                    effectiveWingHalfSpan *
+                    localDiscProgress *
+                    wingEnvelope *
+                    headProtect;
+
+                /*
+                 * BODY BOB: the entire disc dips slightly with each stroke.
+                 * This gives the stingray a gentle undulating feel as it
+                 * "flies" through the water. Only affects the disc, not the head.
+                 */
+                float bodyBob =
+                    MathF.Sin(phase) *
+                    bodyBobAmplitude *
+                    headProtect;
+
+                /*
+                 * TAIL WHIP: traveling wave, zero at the root, growing
+                 * quadratically toward the tip.
+                 * Phase is synced to continue from the rear of the disc.
+                 */
+                float tailOffsetY =
                     MathF.Sin(
-                        delayedPhase + 0.65f) *
-                    1.8f *
-                    wingWeight;
+                        phase - discWaveNumber +
+                        tailProgress * tailWaveLength) *
+                    tailAmplitude *
+                    tailProgress *
+                    tailProgress;
 
-                Color32 sampled =
-                    source.SampleBilinear(
-                        sourceX,
-                        sourceY);
+                /*
+                 * Combine: wings on the disc, tail on the tail.
+                 * Both are near-zero at the junction so there's no seam.
+                 */
+                float totalOffsetY =
+                    (wingOffsetY + bodyBob) * (1f - tailWeight) +
+                    tailOffsetY * tailWeight;
+
+                float totalOffsetX =
+                    wingOffsetX * (1f - tailWeight);
+
+                Color32 sampled = source.SampleBilinear(
+                    localX - totalOffsetX,
+                    localY - totalOffsetY);
 
                 output.Set(
                     destinationX,
@@ -1099,7 +1240,7 @@ internal static class Program
     private static PixelBuffer ExtractSubject(
         PixelBuffer source,
         Rectangle bounds,
-        bool keepLargestComponent)
+        ExtractionOptions options)
     {
         if (bounds.Left < 0 ||
             bounds.Top < 0 ||
@@ -1111,27 +1252,38 @@ internal static class Program
                 $"Crop {bounds} is outside the source image.");
         }
 
-        PixelBuffer result =
-            source.Crop(bounds);
+        PixelBuffer result = source.Crop(bounds);
 
-        RemoveBorderConnectedBackground(result);
+        RemoveBorderConnectedBackground(result, options);
 
-        if (keepLargestComponent)
+        switch (options.ComponentPolicy)
         {
-            KeepLargestOpaqueComponent(result);
+            case ComponentPolicy.LargestBridged:
+                KeepLargestBridgedComponent(
+                    result,
+                    options.ComponentBridgeRadius);
+                break;
+
+            case ComponentPolicy.MinimumSize:
+                RemoveSmallOpaqueComponents(
+                    result,
+                    options.MinimumComponentPixels);
+                break;
         }
 
-        RemoveDarkEdgeFringe(result);
+        if (options.RemoveDarkFringe)
+        {
+            RemoveDarkEdgeFringe(result);
+        }
 
-        ClearLowAlpha(
-            result,
-            MinimumVisibleAlpha);
+        ClearLowAlpha(result, MinimumVisibleAlpha);
 
         return result;
     }
 
     private static void RemoveBorderConnectedBackground(
-        PixelBuffer image)
+        PixelBuffer image,
+        ExtractionOptions options)
     {
         int width = image.Width;
         int height = image.Height;
@@ -1163,7 +1315,8 @@ internal static class Program
             visited[position] = true;
 
             if (!IsBackground(
-                    image.Get(x, y)))
+                    image.Get(x, y),
+                    options))
             {
                 return;
             }
@@ -1211,7 +1364,8 @@ internal static class Program
     }
 
     private static bool IsBackground(
-        Color32 color)
+        Color32 color,
+        ExtractionOptions options)
     {
         if (color.A == 0)
             return true;
@@ -1224,141 +1378,197 @@ internal static class Program
             color.R,
             Math.Min(color.G, color.B));
 
-        int chroma = maximum - minimum;
-
-        // Only border-connected pixels are removed, so dark outlines
-        // inside fish remain intact.
-        return maximum <= 32 && chroma <= 24;
+        return maximum <= options.BackgroundMaxBrightness &&
+               maximum - minimum <= options.BackgroundMaxChroma;
     }
 
-    private static void KeepLargestOpaqueComponent(
-        PixelBuffer image)
+    private static void KeepLargestBridgedComponent(
+        PixelBuffer image,
+        int bridgeRadius)
     {
         int width = image.Width;
         int height = image.Height;
         int count = width * height;
 
-        bool[] visited =
-            new bool[count];
+        bool[] visible = new bool[count];
 
-        List<int>? largest = null;
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                visible[y * width + x] =
+                    image.Get(x, y).A >= MinimumVisibleAlpha;
+
+        /*
+         * Dilate visibility so components separated by gaps narrower than
+         * (2 * bridgeRadius) merge into one bridged component.
+         */
+        bool[] bridged = new bool[count];
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                if (!visible[y * width + x])
+                    continue;
+
+                for (int dy = -bridgeRadius; dy <= bridgeRadius; dy++)
+                {
+                    int ny = y + dy;
+                    if (ny < 0 || ny >= height) continue;
+
+                    for (int dx = -bridgeRadius; dx <= bridgeRadius; dx++)
+                    {
+                        int nx = x + dx;
+                        if (nx < 0 || nx >= width) continue;
+
+                        bridged[ny * width + nx] = true;
+                    }
+                }
+            }
+        }
+
+        /*
+         * Label bridged components; rank them by their VISIBLE pixel count.
+         */
+        int[] label = new int[count];
+        Array.Fill(label, -1);
+
         Queue<int> queue = new();
 
-        for (int start = 0;
-             start < count;
-             start++)
-        {
-            int startX =
-                start % width;
+        int nextLabel = 0;
+        int bestLabel = -1;
+        int bestVisible = -1;
 
-            int startY =
-                start / width;
+        for (int start = 0; start < count; start++)
+        {
+            if (!bridged[start] || label[start] >= 0)
+                continue;
+
+            int visibleCount = 0;
+
+            label[start] = nextLabel;
+            queue.Enqueue(start);
+
+            while (queue.Count > 0)
+            {
+                int position = queue.Dequeue();
+
+                if (visible[position])
+                    visibleCount++;
+
+                int x = position % width;
+                int y = position / width;
+
+                if (x > 0) TryLabel(position - 1);
+                if (x < width - 1) TryLabel(position + 1);
+                if (y > 0) TryLabel(position - width);
+                if (y < height - 1) TryLabel(position + width);
+            }
+
+            if (visibleCount > bestVisible)
+            {
+                bestVisible = visibleCount;
+                bestLabel = nextLabel;
+            }
+
+            nextLabel++;
+
+            void TryLabel(int position)
+            {
+                if (bridged[position] && label[position] < 0)
+                {
+                    label[position] = nextLabel;
+                    queue.Enqueue(position);
+                }
+            }
+        }
+
+        if (bestLabel < 0)
+            return;
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int position = y * width + x;
+
+                if (visible[position] &&
+                    label[position] != bestLabel)
+                {
+                    image.Set(x, y, Color32.Transparent);
+                }
+            }
+        }
+    }
+
+    private static void RemoveSmallOpaqueComponents(
+        PixelBuffer image,
+        int minimumPixels)
+    {
+        int width = image.Width;
+        int height = image.Height;
+        int count = width * height;
+
+        bool[] visited = new bool[count];
+        Queue<int> queue = new();
+        List<int> component = [];
+
+        for (int start = 0; start < count; start++)
+        {
+            int startX = start % width;
+            int startY = start / width;
 
             if (visited[start] ||
-                image.Get(startX, startY).A <
-                MinimumVisibleAlpha)
+                image.Get(startX, startY).A < MinimumVisibleAlpha)
             {
                 continue;
             }
 
-            List<int> component = [];
-
+            component.Clear();
             visited[start] = true;
             queue.Enqueue(start);
 
             while (queue.Count > 0)
             {
-                int position =
-                    queue.Dequeue();
-
+                int position = queue.Dequeue();
                 component.Add(position);
 
-                int x =
-                    position % width;
+                int x = position % width;
+                int y = position / width;
 
-                int y =
-                    position / width;
-
-                for (int offsetY = -1;
-                     offsetY <= 1;
-                     offsetY++)
+                for (int dy = -1; dy <= 1; dy++)
                 {
-                    for (int offsetX = -1;
-                         offsetX <= 1;
-                         offsetX++)
+                    for (int dx = -1; dx <= 1; dx++)
                     {
-                        if (offsetX == 0 &&
-                            offsetY == 0)
+                        if (dx == 0 && dy == 0) continue;
+
+                        int nx = x + dx;
+                        int ny = y + dy;
+
+                        if (nx < 0 || ny < 0 ||
+                            nx >= width || ny >= height)
                         {
                             continue;
                         }
 
-                        int nextX =
-                            x + offsetX;
+                        int next = ny * width + nx;
 
-                        int nextY =
-                            y + offsetY;
-
-                        if (nextX < 0 ||
-                            nextY < 0 ||
-                            nextX >= width ||
-                            nextY >= height)
+                        if (!visited[next] &&
+                            image.Get(nx, ny).A >= MinimumVisibleAlpha)
                         {
-                            continue;
+                            visited[next] = true;
+                            queue.Enqueue(next);
                         }
-
-                        int nextPosition =
-                            nextY * width +
-                            nextX;
-
-                        if (visited[nextPosition] ||
-                            image.Get(
-                                nextX,
-                                nextY).A <
-                            MinimumVisibleAlpha)
-                        {
-                            continue;
-                        }
-
-                        visited[nextPosition] = true;
-                        queue.Enqueue(nextPosition);
                     }
                 }
             }
 
-            if (largest is null ||
-                component.Count > largest.Count)
+            if (component.Count < minimumPixels)
             {
-                largest = component;
-            }
-        }
-
-        if (largest is null)
-        {
-            return;
-        }
-
-        bool[] keep =
-            new bool[count];
-
-        foreach (int position in largest)
-        {
-            keep[position] = true;
-        }
-
-        for (int y = 0;
-             y < height;
-             y++)
-        {
-            for (int x = 0;
-                 x < width;
-                 x++)
-            {
-                if (!keep[y * width + x])
+                foreach (int position in component)
                 {
                     image.Set(
-                        x,
-                        y,
+                        position % width,
+                        position / width,
                         Color32.Transparent);
                 }
             }
@@ -1448,21 +1658,13 @@ internal static class Program
 
         PixelBuffer left = ExtractSubject(
             source,
-            new Rectangle(
-                0,
-                250,
-                680,
-                550),
-            keepLargestComponent: true);
+            new Rectangle(0, 250, 680, 550),
+            ExtractionOptions.Reef);
 
         PixelBuffer right = ExtractSubject(
             source,
-            new Rectangle(
-                775,
-                172,
-                564,
-                628),
-            keepLargestComponent: true);
+            new Rectangle(775, 172, 564, 628),
+            ExtractionOptions.Reef);
 
         using Bitmap leftBitmap =
             left.ToBitmap();
@@ -1767,6 +1969,47 @@ internal static class Program
         NormalFish,
         Triggerfish,
         Stingray
+    }
+
+    private enum ComponentPolicy
+    {
+        KeepAll,
+        LargestBridged,
+        MinimumSize
+    }
+
+    private sealed record ExtractionOptions(
+        int BackgroundMaxBrightness,
+        int BackgroundMaxChroma,
+        bool RemoveDarkFringe,
+        ComponentPolicy ComponentPolicy,
+        int MinimumComponentPixels,
+        int ComponentBridgeRadius)
+    {
+        /*
+         * Fish: normal background threshold, but bridge thin transparent
+         * cuts (eaten dark stripes) so one fish is one component.
+         */
+        public static ExtractionOptions Fish { get; } = new(
+            BackgroundMaxBrightness: 32,
+            BackgroundMaxChroma: 24,
+            RemoveDarkFringe: true,
+            ComponentPolicy: ComponentPolicy.LargestBridged,
+            MinimumComponentPixels: 0,
+            ComponentBridgeRadius: 3);
+
+        /*
+         * Reefs: only remove genuinely near-black pixels so the dark rock in
+         * the middle of the left reef survives. No dark-fringe erosion —
+         * reefs sit against dark water, so a soft dark edge is invisible.
+         */
+        public static ExtractionOptions Reef { get; } = new(
+            BackgroundMaxBrightness: 14,
+            BackgroundMaxChroma: 10,
+            RemoveDarkFringe: false,
+            ComponentPolicy: ComponentPolicy.MinimumSize,
+            MinimumComponentPixels: 150,
+            ComponentBridgeRadius: 0);
     }
 
     private sealed record CreatureDefinition(
