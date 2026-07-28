@@ -1,7 +1,7 @@
 # Bubble System Redesign
 
 **Date:** 2026-07-27
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -24,7 +24,7 @@ Replaces `BubbleStreamConfig`. Per-emitter persisted configuration:
 | Property   | Type  | Range        | Default | Description                        |
 |------------|-------|--------------|---------|------------------------------------|
 | X          | float | 0–100        | 50      | Horizontal position (% from left)  |
-| Y          | float | 0–100        | 10      | Vertical position (% from bottom)  |
+| Y          | float | 0–100        | 10      | Vertical position (% from top)     |
 | Speed      | float | 0.1–3.0      | 1.0     | Float speed multiplier             |
 | SizeMin    | float | 5–80         | 15      | Minimum bubble diameter (px at 1080p) |
 | SizeMax    | float | 5–80         | 30      | Maximum bubble diameter (px at 1080p) |
@@ -86,7 +86,7 @@ Individual bubble particle with:
 - Same sprite selection: `SpriteAtlas.GetBubbleForDiameter()` picks closest pre-rendered PNG
 - Same drawing: translate to position, scale to diameter, draw
 - Viewport scaling: `diameter * viewportScale` where viewportScale is clamped 0.72–1.75× based on 1080p reference
-- X/Y conversion: emitter X% maps to `world.Left + (X / 100) * world.Width`; emitter Y% maps to `world.Top + (Y / 100) * world.Height` (Y from bottom)
+- X/Y conversion: emitter X% maps to `world.Left + (X / 100) * world.Width`; emitter Y% maps to `world.Top + (Y / 100) * world.Height` (Y from top)
 - X clamped to keep bubble fully on screen (account for radius + sway)
 
 ## Settings UI (ConfigForm)
@@ -112,7 +112,7 @@ Each emitter row shows:
 
 - **Add:** Append new row with defaults (X=50, Y=10, Speed=1.0, SizeMin=15, SizeMax=30, Enabled=true). Re-layout form.
 - **Remove:** Remove the clicked row. Re-index all remaining row labels. Re-layout form.
-- **Size validation:** If SizeMin > SizeMax after user edit, clamp SizeMin = SizeMax (or swap them — clamp is simpler).
+- **Size validation:** If SizeMin > SizeMax after user edit, swap them so SizeMin holds the smaller value. This preserves the user's intent (they picked two sizes) better than clamping, which silently discards one value.
 - **Preview:** Updates on any change (same `OnChanged` pattern as today).
 - **Save/Load:** On OK, build `BubbleEmitterConfig[]` from rows and save. On load, populate rows from settings.
 

@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -357,6 +358,8 @@ public class ScreensaverForm : Form
         _clientSize = new Size(
             Math.Max(1, ClientSize.Width),
             Math.Max(1, ClientSize.Height));
+
+        AppLog.Log($"InitScene: ClientSize={ClientSize}, Bounds={Bounds}, screen={(_screen?.DeviceName ?? "null")}, screenBounds={(_screen?.Bounds.ToString() ?? "null")}");
 
         // Full-screen monitor forms use the four-argument constructor so
         // every monitor shares one virtual-desktop aquarium.
@@ -742,17 +745,13 @@ public class PreviewForm : Form
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
-        var previewFish = Math.Max(2, Math.Min(3, _settings.FishCount));
-        var previewBubbles = Math.Max(5, Math.Min(20, _settings.BubbleDensity));
         var previewSettings = new SettingsData
         {
-            FishCount = previewFish,
-            BubbleDensity = previewBubbles,
-            ShowSeaweed = _settings.ShowSeaweed,
-            ShowLightShafts = false,
-            ShowBackgroundChest = false,
+            SwimAngle = _settings.SwimAngle,
             BackgroundTopColor = _settings.BackgroundTopColor,
             BackgroundBottomColor = _settings.BackgroundBottomColor,
+            BubbleEmitters = _settings.BubbleEmitters.Select(e => (BubbleEmitterConfig)e.Clone()).ToArray(),
+            SpeciesConfigs = _settings.SpeciesConfigs.ToDictionary(k => k.Key, v => (SpeciesConfig)v.Value.Clone()),
         };
 
         _scene = new Scene(42, previewSettings, ClientSize);
@@ -808,10 +807,12 @@ public class PreviewForm : Form
         _backGraphics = Graphics.FromImage(_backBuffer);
         _backGraphics.SmoothingMode = SmoothingMode.AntiAlias;
 
-        _scene = new Scene(42, new SettingsData { FishCount = Math.Max(2, Math.Min(3, _settings.FishCount)),
-            BubbleDensity = Math.Max(5, Math.Min(20, _settings.BubbleDensity)),
-            ShowSeaweed = _settings.ShowSeaweed, ShowLightShafts = false, ShowBackgroundChest = false,
-            BackgroundTopColor = _settings.BackgroundTopColor, BackgroundBottomColor = _settings.BackgroundBottomColor }, ClientSize);
+        _scene = new Scene(42, new SettingsData {
+            SwimAngle = _settings.SwimAngle,
+            BackgroundTopColor = _settings.BackgroundTopColor, BackgroundBottomColor = _settings.BackgroundBottomColor,
+            BubbleEmitters = _settings.BubbleEmitters.Select(e => (BubbleEmitterConfig)e.Clone()).ToArray(),
+            SpeciesConfigs = _settings.SpeciesConfigs.ToDictionary(k => k.Key, v => (SpeciesConfig)v.Value.Clone()),
+        }, ClientSize);
     }
 
     void ClosePreview()
@@ -834,15 +835,19 @@ public class PreviewForm : Form
 
 public class ConfigForm : Form
 {
-    NumericUpDown _nudFish = null!, _nudBubbles = null!;
-    TrackBar _trkSpeed = null!;
-    Label _lblSpeed = null!;
-    CheckBox _chkChest = null!, _chkIndependent = null!, _chkBattery = null!;
-    Button _btnTopColor = null!, _btnBottomColor = null!;
-    Label _lblTopColor = null!, _lblBottomColor = null!;
+    // Global settings controls
+    NumericUpDown _nudSwimAngle = null!;
+    Label _lblSwimAngle = null!;
+    CheckBox _chkIndependent = null!, _chkBattery = null!;
     ComboBox _cmbFps = null!;
     Button _btnOk = null!, _btnCancel = null!, _btnDefaults = null!;
     Panel _previewPanel = null!;
+
+    // Per-species controls stored in a list
+    readonly List<SpeciesRow> _speciesRows = new();
+    // Per-bubble-emitter controls
+    readonly List<BubbleEmitterRow> _bubbleEmitterRows = new();
+    Button _btnAddEmitter = null!;
 
     SettingsData _settings;
     Scene? _previewScene;
@@ -853,8 +858,6 @@ public class ConfigForm : Form
         _settings = Settings.Load();
         Text = "Aquarium Screensaver Settings";
         StartPosition = FormStartPosition.CenterParent;
-        Size = new Size(400, 540);
-        MinimumSize = Size;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = MinimizeBox = false;
         AutoScaleMode = AutoScaleMode.Dpi;
@@ -866,68 +869,95 @@ public class ConfigForm : Form
     {
         int xR = 215, xL = 15, y = 12, rh = 28;
 
-        AddLabel(xL, y, "Fish count:");
-        _nudFish = AddNud(xR, y, SettingsData.FishCountMin, SettingsData.FishCountMax);
+        // ── Global section ──
+        var globalHeader = new Label { Text = "Global Settings", Location = new Point(xL, y), AutoSize = true, Font = new Font(Font.FontFamily, 9f, FontStyle.Bold) };
+        Controls.Add(globalHeader);
+        y += 20;
+
+        AddLabel(xL, y, "Swim angle (deg):");
+        _nudSwimAngle = AddNud(xR, y, SettingsData.SwimAngleMin, SettingsData.SwimAngleMax);
+        _nudSwimAngle.DecimalPlaces = 1;
+        _nudSwimAngle.Increment = 1;
+        Controls.Add(_nudSwimAngle);
+        _lblSwimAngle = new Label { Location = new Point(xR + 70, y + 2), AutoSize = true };
+        Controls.Add(_lblSwimAngle);
         y += rh;
 
-        AddLabel(xL, y, "Bubble density:");
-        _nudBubbles = AddNud(xR, y, SettingsData.BubbleDensityMin, SettingsData.BubbleDensityMax);
-        y += rh;
-
-        AddLabel(xL, y, "Speed:");
-        _trkSpeed = new TrackBar { Location = new Point(xR - 5, y - 2), Minimum = 25, Maximum = 300, Width = 180, TickFrequency = 25 };
-        _trkSpeed.Scroll += (_, _) => _lblSpeed.Text = (_trkSpeed.Value / 100f).ToString("F2") + "x";
-        Controls.Add(_trkSpeed);
-        _lblSpeed = new Label { Location = new Point(xR + 185, y + 2), AutoSize = true };
-        Controls.Add(_lblSpeed);
-        y += rh + 4;
-
-
-        _chkChest = AddCb(xL, y, "Show background chest"); y += rh;
-        _chkIndependent = AddCb(xL, y, "Independent scenes per monitor"); y += rh;
-        _chkBattery = AddCb(xL, y, "Pause on battery"); y += rh + 4;
-
-        AddLabel(xL, y, "Top color:");
-        _btnTopColor = new Button { Location = new Point(xR, y + 1), Text = "▬", Size = new Size(50, 22) };
-        _btnTopColor.Click += (_, _) => PickColor(true);
-        Controls.Add(_btnTopColor);
-        _lblTopColor = new Label { Location = new Point(xR + 58, y + 3), AutoSize = true };
-        Controls.Add(_lblTopColor);
-        AddLabel(215, y, "Bottom color:");
-        _btnBottomColor = new Button { Location = new Point(300, y + 1), Text = "▬", Size = new Size(50, 22) };
-        _btnBottomColor.Click += (_, _) => PickColor(false);
-        Controls.Add(_btnBottomColor);
-        _lblBottomColor = new Label { Location = new Point(358, y + 3), AutoSize = true };
-        Controls.Add(_lblBottomColor);
-        y += rh + 4;
+                _chkIndependent = AddCb(xL, y, "Independent scenes per monitor"); y += rh;
+        _chkBattery = AddCb(xL, y, "Pause on battery"); y += rh + 2;
 
         AddLabel(xL, y, "Target FPS:");
         _cmbFps = new ComboBox { Location = new Point(xR, y + 1), DropDownStyle = ComboBoxStyle.DropDownList, Width = 60 };
         _cmbFps.Items.AddRange(new object[] { "Auto", "30", "50", "60", "100", "120" });
         Controls.Add(_cmbFps);
-        y += rh + 12;
+        y += rh + 8;
 
+        // ── Bubble emitters section ──
+        var bubbleHeader = new Label { Text = "Bubble Emitters", Location = new Point(xL, y), AutoSize = true, Font = new Font(Font.FontFamily, 9f, FontStyle.Bold) };
+        Controls.Add(bubbleHeader);
+        y += 20;
+
+        _btnAddEmitter = new Button { Text = "Add Emitter", Location = new Point(xL + 340, y - 18), Size = new Size(90, 22) };
+        _btnAddEmitter.Click += (_, _) => AddEmitterRow();
+        Controls.Add(_btnAddEmitter);
+        y += 4;
+
+        // Emitters are populated in LoadValues(); placeholder to reserve space
+        y += 26; // will be adjusted after LoadValues populates rows
+
+        // ── Species section ──
+        var speciesHeader = new Label { Text = "Fish Species", Location = new Point(xL, y), AutoSize = true, Font = new Font(Font.FontFamily, 9f, FontStyle.Bold) };
+        Controls.Add(speciesHeader);
+        y += 20;
+
+        // Build per-species rows from the sprite atlas
+        SpriteAtlas atlas = SpriteAtlas.Instance;
+        for (int i = 0; i < atlas.SpeciesCount; i++)
+        {
+            FishSpriteSet species = atlas.GetSpecies(i);
+            var row = new SpeciesRow(species.Name);
+            _speciesRows.Add(row);
+            row.Location = new Point(xL, y);
+            row.OnChanged += () => UpdatePreview();
+            Controls.Add(row);
+            y += 26;
+        }
+        y += 8;
+
+        // ── Preview ──
         Controls.Add(new Label { Text = "Preview:", Location = new Point(xL, y), AutoSize = true });
         y += 18;
-        _previewPanel = new Panel { Location = new Point(xL, y), Size = new Size(365, 100), BackColor = Color.Black, BorderStyle = BorderStyle.FixedSingle };
+        _previewPanel = new Panel { Location = new Point(xL, y), Size = new Size(550, 100), BackColor = Color.Black, BorderStyle = BorderStyle.FixedSingle };
         Controls.Add(_previewPanel);
         y += 110;
 
+        // ── Buttons ──
         _btnDefaults = new Button { Text = "Defaults", Location = new Point(xL, y), Size = new Size(75, 25) };
         _btnDefaults.Click += (_, _) => { _settings = SettingsData.Defaults; LoadValues(); };
         Controls.Add(_btnDefaults);
 
-        _btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(215, y), Size = new Size(75, 25) };
+        _btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(425, y), Size = new Size(75, 25) };
         Controls.Add(_btnOk);
-        _btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(298, y), Size = new Size(75, 25) };
+        _btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(508, y), Size = new Size(75, 25) };
         Controls.Add(_btnCancel);
         AcceptButton = _btnOk;
         CancelButton = _btnCancel;
+
+        // Size to content — use ClientSize so all controls fit including non-client chrome
+        ClientSize = new Size(580, y + 45);
+        MinimumSize = Size;
     }
 
     NumericUpDown AddNud(int x, int y, int min, int max)
     {
         var nud = new NumericUpDown { Location = new Point(x, y + 2), Minimum = min, Maximum = max, Width = 60 };
+        Controls.Add(nud);
+        return nud;
+    }
+
+    NumericUpDown AddNud(int x, int y, float min, float max)
+    {
+        var nud = new NumericUpDown { Location = new Point(x, y + 2), Minimum = (decimal)min, Maximum = (decimal)max, Width = 60 };
         Controls.Add(nud);
         return nud;
     }
@@ -947,64 +977,178 @@ public class ConfigForm : Form
 
     void LoadValues()
     {
-        _nudFish.Value = _settings.FishCount;
-        _nudBubbles.Value = _settings.BubbleDensity;
-        _trkSpeed.Value = (int)(_settings.SpeedMultiplier * 100);
-        _lblSpeed.Text = (_settings.SpeedMultiplier).ToString("F2") + "x";
+        _nudSwimAngle.Value = (decimal)_settings.SwimAngle;
+        _lblSwimAngle.Text = $"{_settings.SwimAngle:F1}°";
 
-        _chkChest.Checked = _settings.ShowBackgroundChest;
+        // Load per-emitter bubble values — rebuild dynamic rows
+        RebuildEmitterRows(_settings.BubbleEmitters);
+
         _chkIndependent.Checked = _settings.IndependentScenesPerMonitor;
         _chkBattery.Checked = _settings.PauseOnBattery;
         _cmbFps.SelectedItem = _settings.TargetFps <= 0
             ? "Auto"
             : _settings.TargetFps.ToString();
 
-        UpdateColorBtn(true);
-        UpdateColorBtn(false);
+        // Load per-species values
+        foreach (var row in _speciesRows)
+        {
+            var cfg = _settings.GetSpeciesConfig(row.Name);
+            row.Speed = cfg.Speed;
+            row.Scale = cfg.Scale;
+        }
+
         UpdatePreview();
     }
 
-    void UpdateColorBtn(bool top)
+    void RebuildEmitterRows(BubbleEmitterConfig[] configs)
     {
-        var hex = top ? _settings.BackgroundTopColor : _settings.BackgroundBottomColor;
-        var btn = top ? _btnTopColor : _btnBottomColor;
-        var lbl = top ? _lblTopColor : _lblBottomColor;
-        try
+        // Remove existing rows
+        foreach (var row in _bubbleEmitterRows)
         {
-            var c = top ? _settings.GetTopColor() : _settings.GetBottomColor();
-            btn.BackColor = c;
-            lbl.Text = hex;
+            Controls.Remove(row);
+            row.Dispose();
         }
-        catch { btn.BackColor = Color.Gray; lbl.Text = hex; }
+        _bubbleEmitterRows.Clear();
+
+        // Find the Y position where emitter rows start (after the "Bubble Emitters" header + Add button)
+        // We need to compute the correct Y. Walk controls to find the species header's Y - 26.
+        int startY = FindEmitterStartY();
+
+        for (int i = 0; i < configs.Length; i++)
+        {
+            var cfg = configs[i];
+            var row = new BubbleEmitterRow(i + 1);
+            row.X = cfg.X;
+            row.Y = cfg.Y;
+            row.Speed = cfg.Speed;
+            row.SizeMax = cfg.SizeMax;
+            row.SizeMin = cfg.SizeMin;
+            row.EmitterEnabled = cfg.Enabled;
+            row.OnChanged += () => UpdatePreview();
+            row.OnRemove += () => RemoveEmitterRow(row);
+            _bubbleEmitterRows.Add(row);
+            row.Location = new Point(15, startY);
+            Controls.Add(row);
+            startY += 26;
+        }
+
+        // Reposition controls below emitters
+        RepositionBelowEmitters(startY);
+
+        UpdateAddButtonState();
     }
 
-    void PickColor(bool top)
+    int FindEmitterStartY()
     {
-        var dlg = new ColorDialog { FullOpen = true, AnyColor = true };
-        try { dlg.Color = top ? _settings.GetTopColor() : _settings.GetBottomColor(); }
-        catch { }
-        if (dlg.ShowDialog() == DialogResult.OK)
+        // The Add button is at y-18 from the header y. We need the row start after it.
+        // Walk controls to find the species header and work backwards.
+        foreach (Control ctrl in Controls)
         {
-            var hex = $"#{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}";
-            if (top) _settings.BackgroundTopColor = hex; else _settings.BackgroundBottomColor = hex;
-            UpdateColorBtn(top);
-            UpdatePreview();
+            if (ctrl is Label lbl && lbl.Text == "Fish Species")
+            {
+                // Emitter rows end 8px before species header
+                return lbl.Location.Y - 8 - (_bubbleEmitterRows.Count > 0 ? _bubbleEmitterRows.Count * 26 : 26);
+            }
         }
+        // Fallback: compute from Add button position
+        return _btnAddEmitter.Location.Y + 24;
+    }
+
+    void RepositionBelowEmitters(int afterEmitterY)
+    {
+        // Find the species header and everything below it, shift down
+        Control? speciesHeader = null;
+        foreach (Control ctrl in Controls)
+        {
+            if (ctrl is Label lbl && lbl.Text == "Fish Species")
+            {
+                speciesHeader = ctrl;
+                break;
+            }
+        }
+        if (speciesHeader == null) return;
+
+        int oldSpeciesY = speciesHeader.Location.Y;
+        int newSpeciesY = afterEmitterY + 8;
+        int deltaY = newSpeciesY - oldSpeciesY;
+        if (deltaY == 0) return;
+
+        // Move all controls that are at or below speciesHeader
+        foreach (Control ctrl in Controls.Cast<Control>().ToArray())
+        {
+            if (ctrl.Location.Y >= oldSpeciesY)
+            {
+                ctrl.Location = new Point(ctrl.Location.X, ctrl.Location.Y + deltaY);
+            }
+        }
+
+        // Resize form
+        ClientSize = new Size(ClientSize.Width, ClientSize.Height + deltaY);
+    }
+
+    void AddEmitterRow()
+    {
+        if (_bubbleEmitterRows.Count >= SettingsData.MaxEmitters) return;
+
+        var cfg = new BubbleEmitterConfig();
+        var row = new BubbleEmitterRow(_bubbleEmitterRows.Count + 1);
+        row.EmitterEnabled = true;
+        row.OnChanged += () => UpdatePreview();
+        row.OnRemove += () => RemoveEmitterRow(row);
+
+        // Find insertion Y
+        int insertY = _bubbleEmitterRows.Count > 0
+            ? _bubbleEmitterRows[^1].Location.Y + 26
+            : FindEmitterStartY();
+
+        row.Location = new Point(15, insertY);
+        _bubbleEmitterRows.Add(row);
+        Controls.Add(row);
+
+        RepositionBelowEmitters(insertY + 26);
+        UpdateAddButtonState();
+        UpdatePreview();
+    }
+
+    void RemoveEmitterRow(BubbleEmitterRow row)
+    {
+        if (_bubbleEmitterRows.Count <= SettingsData.MinEmitters) return;
+
+        int idx = _bubbleEmitterRows.IndexOf(row);
+        _bubbleEmitterRows.RemoveAt(idx);
+        Controls.Remove(row);
+        row.Dispose();
+
+        // Re-index labels
+        for (int i = 0; i < _bubbleEmitterRows.Count; i++)
+        {
+            _bubbleEmitterRows[i].Index = i + 1;
+        }
+
+        // Reposition remaining rows
+        int startY = FindEmitterStartY();
+        for (int i = 0; i < _bubbleEmitterRows.Count; i++)
+        {
+            _bubbleEmitterRows[i].Location = new Point(15, startY + i * 26);
+        }
+
+        RepositionBelowEmitters(startY + _bubbleEmitterRows.Count * 26);
+        UpdateAddButtonState();
+        UpdatePreview();
+    }
+
+    void UpdateAddButtonState()
+    {
+        _btnAddEmitter.Enabled = _bubbleEmitterRows.Count < SettingsData.MaxEmitters;
     }
 
     void UpdatePreview()
     {
+        // Build settings from current UI state
+        var previewSettings = BuildSettingsFromUi();
+
         _previewScene?.Dispose();
-        _previewScene = new Scene(42, new SettingsData
-        {
-            FishCount = Math.Max(2, Math.Min(5, _settings.FishCount)),
-            BubbleDensity = Math.Max(5, Math.Min(30, _settings.BubbleDensity)),
-            ShowSeaweed = _settings.ShowSeaweed,
-            ShowLightShafts = _settings.ShowLightShafts,
-            ShowBackgroundChest = _settings.ShowBackgroundChest,
-            BackgroundTopColor = _settings.BackgroundTopColor,
-            BackgroundBottomColor = _settings.BackgroundBottomColor,
-        }, _previewPanel.ClientSize);
+        _previewScene = new Scene(42, previewSettings, _previewPanel.ClientSize);
 
         _previewPanel.Paint -= PreviewPaint;
         _previewPanel.Paint += PreviewPaint;
@@ -1024,23 +1168,50 @@ public class ConfigForm : Form
         _previewScene.Draw(e.Graphics, _previewPanel.ClientSize);
     }
 
+    SettingsData BuildSettingsFromUi()
+    {
+        var s = new SettingsData
+        {
+            SwimAngle = (float)_nudSwimAngle.Value,
+            IndependentScenesPerMonitor = _chkIndependent.Checked,
+            PauseOnBattery = _chkBattery.Checked,
+        };
+
+        string selectedFps = _cmbFps.SelectedItem?.ToString() ?? "Auto";
+        s.TargetFps = selectedFps == "Auto" ? 0 : int.Parse(selectedFps);
+
+        // Collect per-emitter bubble configs from UI rows
+        s.BubbleEmitters = _bubbleEmitterRows.Select(row => new BubbleEmitterConfig
+        {
+            X = row.X,
+            Y = row.Y,
+            Speed = row.Speed,
+            SizeMin = row.SizeMin,
+            SizeMax = row.SizeMax,
+            Enabled = row.EmitterEnabled,
+        }).ToArray();
+
+        // Collect per-species configs from UI rows
+        foreach (var row in _speciesRows)
+        {
+            var cfg = new SpeciesConfig
+            {
+                Name = row.Name,
+                Speed = row.Speed,
+                Scale = row.Scale,
+            };
+            s.SpeciesConfigs[row.Name] = cfg;
+        }
+
+        return s.Clamp();
+    }
+
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         if (DialogResult == DialogResult.OK)
         {
-            _settings.FishCount = (int)_nudFish.Value;
-            _settings.BubbleDensity = (int)_nudBubbles.Value;
-            _settings.SpeedMultiplier = _trkSpeed.Value / 100f;
-            _settings.ShowSeaweed = false;
-            _settings.ShowLightShafts = false;
-            _settings.ShowBackgroundChest = _chkChest.Checked;
-            _settings.IndependentScenesPerMonitor = _chkIndependent.Checked;
-            _settings.PauseOnBattery = _chkBattery.Checked;
-            string selectedFps = _cmbFps.SelectedItem?.ToString() ?? "Auto";
-            _settings.TargetFps = selectedFps == "Auto"
-                ? 0
-                : int.Parse(selectedFps);
-            Settings.Save(_settings.Clamp());
+            var finalSettings = BuildSettingsFromUi();
+            Settings.Save(finalSettings);
         }
         base.OnFormClosing(e);
     }
@@ -1049,6 +1220,227 @@ public class ConfigForm : Form
     {
         _previewTimer?.Stop(); _previewTimer?.Dispose(); _previewScene?.Dispose();
         base.OnClosed(e);
+    }
+
+    // ── BubbleEmitterRow — per-emitter bubble config row ────────────────────
+    private class BubbleEmitterRow : Panel
+    {
+        public int Index
+        {
+            get => int.Parse(_lblName.Text.Replace("Emitter ", ""));
+            set => _lblName.Text = $"Emitter {value}";
+        }
+
+        public float X
+        {
+            get => (float)_nudX.Value;
+            set => _nudX.Value = (decimal)Math.Clamp(value, BubbleEmitterConfig.XMin, BubbleEmitterConfig.XMax);
+        }
+        public float Y
+        {
+            get => (float)_nudY.Value;
+            set => _nudY.Value = (decimal)Math.Clamp(value, BubbleEmitterConfig.YMin, BubbleEmitterConfig.YMax);
+        }
+        public float Speed
+        {
+            get => (float)_nudSpeed.Value;
+            set => _nudSpeed.Value = (decimal)Math.Clamp(value, BubbleEmitterConfig.SpeedMin, BubbleEmitterConfig.SpeedMax);
+        }
+        public float SizeMin
+        {
+            get => (float)_nudSizeMin.Value;
+            set => _nudSizeMin.Value = (decimal)Math.Clamp(value, BubbleEmitterConfig.SizeMinMin, BubbleEmitterConfig.SizeMinMax);
+        }
+        public float SizeMax
+        {
+            get => (float)_nudSizeMax.Value;
+            set => _nudSizeMax.Value = (decimal)Math.Clamp(value, BubbleEmitterConfig.SizeMinMin, BubbleEmitterConfig.SizeMinMax);
+        }
+        public bool EmitterEnabled
+        {
+            get => _chkEnabled.Checked;
+            set => _chkEnabled.Checked = value;
+        }
+
+        public event Action? OnChanged;
+        public event Action? OnRemove;
+
+        private readonly CheckBox _chkEnabled;
+        private readonly Label _lblName;
+        private readonly NumericUpDown _nudX;
+        private readonly NumericUpDown _nudY;
+        private readonly NumericUpDown _nudSpeed;
+        private readonly NumericUpDown _nudSizeMin;
+        private readonly NumericUpDown _nudSizeMax;
+        private readonly Button _btnRemove;
+
+        public BubbleEmitterRow(int index)
+        {
+            Size = new Size(450, 24);
+            BackColor = SystemColors.Control;
+            DoubleBuffered = true;
+
+            _chkEnabled = new CheckBox { Location = new Point(2, 3), AutoSize = true, Checked = true };
+            _chkEnabled.CheckedChanged += (_, _) => OnChanged?.Invoke();
+            Controls.Add(_chkEnabled);
+
+            _lblName = new Label { Text = $"Emitter {index}", Location = new Point(30, 5), AutoSize = true };
+            Controls.Add(_lblName);
+
+            var lblX = new Label { Text = "X:", Location = new Point(100, 3), AutoSize = true };
+            Controls.Add(lblX);
+            _nudX = new NumericUpDown
+            {
+                Location = new Point(112, 1),
+                Minimum = (decimal)BubbleEmitterConfig.XMin,
+                Maximum = (decimal)BubbleEmitterConfig.XMax,
+                DecimalPlaces = 0,
+                Increment = 1m,
+                Width = 50
+            };
+            _nudX.ValueChanged += (_, _) => OnChanged?.Invoke();
+            Controls.Add(_nudX);
+
+            var lblY = new Label { Text = "Y:", Location = new Point(168, 3), AutoSize = true };
+            Controls.Add(lblY);
+            _nudY = new NumericUpDown
+            {
+                Location = new Point(180, 1),
+                Minimum = (decimal)BubbleEmitterConfig.YMin,
+                Maximum = (decimal)BubbleEmitterConfig.YMax,
+                DecimalPlaces = 0,
+                Increment = 1m,
+                Width = 50
+            };
+            _nudY.ValueChanged += (_, _) => OnChanged?.Invoke();
+            Controls.Add(_nudY);
+
+            var lblSpeed = new Label { Text = "Speed:", Location = new Point(236, 3), AutoSize = true };
+            Controls.Add(lblSpeed);
+            _nudSpeed = new NumericUpDown
+            {
+                Location = new Point(278, 1),
+                Minimum = (decimal)BubbleEmitterConfig.SpeedMin,
+                Maximum = (decimal)BubbleEmitterConfig.SpeedMax,
+                DecimalPlaces = 1,
+                Increment = 0.1m,
+                Width = 50
+            };
+            _nudSpeed.ValueChanged += (_, _) => OnChanged?.Invoke();
+            Controls.Add(_nudSpeed);
+
+            var lblSizeMin = new Label { Text = "SzMin:", Location = new Point(334, 3), AutoSize = true };
+            Controls.Add(lblSizeMin);
+            _nudSizeMin = new NumericUpDown
+            {
+                Location = new Point(378, 1),
+                Minimum = (decimal)BubbleEmitterConfig.SizeMinMin,
+                Maximum = (decimal)BubbleEmitterConfig.SizeMinMax,
+                DecimalPlaces = 0,
+                Increment = 1m,
+                Width = 45
+            };
+            _nudSizeMin.ValueChanged += (_, _) => ValidateSizeAndNotify();
+            Controls.Add(_nudSizeMin);
+
+            var lblSizeMax = new Label { Text = "SzMax:", Location = new Point(428, 3), AutoSize = true };
+            Controls.Add(lblSizeMax);
+            _nudSizeMax = new NumericUpDown
+            {
+                Location = new Point(475, 1),
+                Minimum = (decimal)BubbleEmitterConfig.SizeMinMin,
+                Maximum = (decimal)BubbleEmitterConfig.SizeMinMax,
+                DecimalPlaces = 0,
+                Increment = 1m,
+                Width = 45
+            };
+            _nudSizeMax.ValueChanged += (_, _) => ValidateSizeAndNotify();
+            Controls.Add(_nudSizeMax);
+
+            // Expand panel width to fit all controls
+            Size = new Size(530, 24);
+
+            _btnRemove = new Button { Text = "\u2715", Location = new Point(530, 1), Size = new Size(22, 22) };
+            _btnRemove.Click += (_, _) => OnRemove?.Invoke();
+            Controls.Add(_btnRemove);
+            Size = new Size(555, 24);
+        }
+
+        private void ValidateSizeAndNotify()
+        {
+            // Swap if SizeMin > SizeMax
+            if (_nudSizeMin.Value > _nudSizeMax.Value)
+            {
+                var tmp = _nudSizeMin.Value;
+                _nudSizeMin.Value = _nudSizeMax.Value;
+                _nudSizeMax.Value = tmp;
+            }
+            OnChanged?.Invoke();
+        }
+    }
+
+    // ── SpeciesRow — per-species config row ─────────────────────────────────
+    private class SpeciesRow : Panel
+    {
+        public new string Name { get; }
+        public float Speed
+        {
+            get => (float)_nudSpeed.Value;
+            set => _nudSpeed.Value = (decimal)Math.Clamp(value, SpeciesConfig.SpeedMin, SpeciesConfig.SpeedMax);
+        }
+        public new float Scale
+        {
+            get => (float)_nudScale.Value;
+            set => _nudScale.Value = (decimal)Math.Clamp(value, SpeciesConfig.ScaleMin, SpeciesConfig.ScaleMax);
+        }
+        public event Action? OnChanged;
+
+        private readonly NumericUpDown _nudSpeed;
+        private readonly NumericUpDown _nudScale;
+
+        public SpeciesRow(string name)
+        {
+            Name = name;
+            Size = new Size(450, 24);
+            BackColor = SystemColors.Control;
+            DoubleBuffered = true;
+
+            var displayName = name.Replace("-", " ");
+            // Capitalize first letter of each word
+            var words = displayName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var title = string.Join(" ", words.Select(w => char.ToUpper(w[0]) + w[1..]));
+
+            var lbl = new Label { Text = title + ":", Location = new Point(0, 3), AutoSize = true, Width = 120 };
+            Controls.Add(lbl);
+
+            var lblSpeed = new Label { Text = "Speed:", Location = new Point(130, 3), AutoSize = true };
+            Controls.Add(lblSpeed);
+            _nudSpeed = new NumericUpDown
+            {
+                Location = new Point(180, 1),
+                Minimum = (decimal)SpeciesConfig.SpeedMin,
+                Maximum = (decimal)SpeciesConfig.SpeedMax,
+                DecimalPlaces = 3,
+                Increment = 0.001m,
+                Width = 70
+            };
+            _nudSpeed.ValueChanged += (_, _) => OnChanged?.Invoke();
+            Controls.Add(_nudSpeed);
+
+            var lblScale = new Label { Text = "Scale:", Location = new Point(260, 3), AutoSize = true };
+            Controls.Add(lblScale);
+            _nudScale = new NumericUpDown
+            {
+                Location = new Point(305, 1),
+                Minimum = (decimal)SpeciesConfig.ScaleMin,
+                Maximum = (decimal)SpeciesConfig.ScaleMax,
+                DecimalPlaces = 2,
+                Increment = 0.05m,
+                Width = 70
+            };
+            _nudScale.ValueChanged += (_, _) => OnChanged?.Invoke();
+            Controls.Add(_nudScale);
+        }
     }
 }
 
