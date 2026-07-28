@@ -11,8 +11,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Exclude AquariumSpriteGenerator from the main project's compilation -->
+    <!-- Exclude sub-projects from the main project's compilation -->
     <Compile Remove="AquariumSpriteGenerator\**\*" />
+    <Compile Remove="CaptureGif\**\*" />
     <Content Include="Sprites\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

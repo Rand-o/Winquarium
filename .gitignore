@@ -7,3 +7,7 @@ publish/
 *.suo
 .vs/
 Prompt/
+CaptureGif/
+frames/
+*.bak
+*.png

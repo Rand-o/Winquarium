@@ -1,5 +1,7 @@
 # AquariumSaver
 
+![AquariumSaver](aquarium.gif)
+
 A Windows screensaver (`.scr`) rendering an animated underwater aquarium with sprite-based fish, rising bubbles, and corner reefs. Renders independently on every monitor at mixed resolutions and DPI, with smooth 30–120 Hz animation.
 
 ## Features
