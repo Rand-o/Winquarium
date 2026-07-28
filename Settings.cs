@@ -313,11 +313,11 @@ public static class Settings
                 }
 
                 // Remove stale indices beyond current count
-                if (beKey.GetValueNames() is string[] existingNames)
+                if (beKey.GetSubKeyNames() is string[] existingSubKeys)
                 {
-                    foreach (string name in existingNames)
+                    foreach (string name in existingSubKeys)
                     {
-                        if (name != "Count" && int.TryParse(name, out int idx) && idx >= s.BubbleEmitters.Length)
+                        if (int.TryParse(name, out int idx) && idx >= s.BubbleEmitters.Length)
                             beKey.DeleteSubKeyTree(name, false);
                     }
                 }
@@ -328,9 +328,9 @@ public static class Settings
             if (speciesKey != null)
             {
                 // Remove stale species entries
-                if (speciesKey.GetValueNames() is string[] existingNames)
+                if (speciesKey.GetSubKeyNames() is string[] existingSpecies)
                 {
-                    foreach (string name in existingNames)
+                    foreach (string name in existingSpecies)
                     {
                         if (!s.SpeciesConfigs.ContainsKey(name))
                             speciesKey.DeleteSubKeyTree(name, false);
