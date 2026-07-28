@@ -82,7 +82,7 @@ public sealed class SettingsData
 {
     public const string RegistryPath = @"Software\AquariumSaver";
     public const string RegistryVersionKey = "Version";
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 6;
 
     public const float SwimAngleMin = 0f;
     public const float SwimAngleMax = 45f;
@@ -94,11 +94,9 @@ public sealed class SettingsData
 
     // Defaults
     public const float DefaultSwimAngle = 15f;
-    public const bool DefaultIndependentScenesPerMonitor = true;
     public const string DefaultBackgroundTopColor = "#FF001845";   // deep blue
     public const string DefaultBackgroundBottomColor = "#FF000208"; // near-black
     public const int DefaultTargetFps = 0; // 0 = Auto (detect monitor refresh rate)
-    public const bool DefaultPauseOnBattery = false;
 
 
     public static SettingsData Defaults => new()
@@ -108,11 +106,9 @@ public sealed class SettingsData
 
     // Global settings
     public float SwimAngle { get; set; } = DefaultSwimAngle;
-    public bool IndependentScenesPerMonitor { get; set; } = DefaultIndependentScenesPerMonitor;
     public string BackgroundTopColor { get; set; } = DefaultBackgroundTopColor;
     public string BackgroundBottomColor { get; set; } = DefaultBackgroundBottomColor;
     public int TargetFps { get; set; } = DefaultTargetFps;
-    public bool PauseOnBattery { get; set; } = DefaultPauseOnBattery;
 
     // Per-emitter bubble configs (1–6 emitters)
     public BubbleEmitterConfig[] BubbleEmitters { get; set; } = [new BubbleEmitterConfig()];
@@ -192,11 +188,9 @@ public static class Settings
             var s = new SettingsData
             {
                 SwimAngle = ReadFloat(key, nameof(SettingsData.SwimAngle), SettingsData.DefaultSwimAngle),
-                IndependentScenesPerMonitor = ReadBool(key, nameof(SettingsData.IndependentScenesPerMonitor), SettingsData.DefaultIndependentScenesPerMonitor),
                 BackgroundTopColor = ReadString(key, nameof(SettingsData.BackgroundTopColor), SettingsData.DefaultBackgroundTopColor),
                 BackgroundBottomColor = ReadString(key, nameof(SettingsData.BackgroundBottomColor), SettingsData.DefaultBackgroundBottomColor),
                 TargetFps = ReadInt(key, nameof(SettingsData.TargetFps), SettingsData.DefaultTargetFps),
-                PauseOnBattery = ReadBool(key, nameof(SettingsData.PauseOnBattery), SettingsData.DefaultPauseOnBattery),
             };
 
             // Load per-emitter bubble configs
@@ -285,11 +279,9 @@ public static class Settings
 
             key.SetValue(SettingsData.RegistryVersionKey, SettingsData.CurrentVersion, RegistryValueKind.DWord);
             key.SetValue(nameof(s.SwimAngle), s.SwimAngle.ToString(System.Globalization.CultureInfo.InvariantCulture), RegistryValueKind.String);
-            key.SetValue(nameof(s.IndependentScenesPerMonitor), s.IndependentScenesPerMonitor ? 1 : 0, RegistryValueKind.DWord);
             key.SetValue(nameof(s.BackgroundTopColor), s.BackgroundTopColor, RegistryValueKind.String);
             key.SetValue(nameof(s.BackgroundBottomColor), s.BackgroundBottomColor, RegistryValueKind.String);
             key.SetValue(nameof(s.TargetFps), s.TargetFps, RegistryValueKind.DWord);
-            key.SetValue(nameof(s.PauseOnBattery), s.PauseOnBattery ? 1 : 0, RegistryValueKind.DWord);
 
             // Save per-emitter bubble configs
             using var beKey = key.CreateSubKey("BubbleEmitters", true);

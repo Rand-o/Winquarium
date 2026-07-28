@@ -838,7 +838,6 @@ public class ConfigForm : Form
     // Global settings controls
     NumericUpDown _nudSwimAngle = null!;
     Label _lblSwimAngle = null!;
-    CheckBox _chkIndependent = null!, _chkBattery = null!;
     ComboBox _cmbFps = null!;
     Button _btnOk = null!, _btnCancel = null!, _btnDefaults = null!;
     Panel _previewPanel = null!;
@@ -882,9 +881,6 @@ public class ConfigForm : Form
         _lblSwimAngle = new Label { Location = new Point(xR + 70, y + 2), AutoSize = true };
         Controls.Add(_lblSwimAngle);
         y += rh;
-
-                _chkIndependent = AddCb(xL, y, "Independent scenes per monitor"); y += rh;
-        _chkBattery = AddCb(xL, y, "Pause on battery"); y += rh + 2;
 
         AddLabel(xL, y, "Target FPS:");
         _cmbFps = new ComboBox { Location = new Point(xR, y + 1), DropDownStyle = ComboBoxStyle.DropDownList, Width = 60 };
@@ -983,8 +979,6 @@ public class ConfigForm : Form
         // Load per-emitter bubble values — rebuild dynamic rows
         RebuildEmitterRows(_settings.BubbleEmitters);
 
-        _chkIndependent.Checked = _settings.IndependentScenesPerMonitor;
-        _chkBattery.Checked = _settings.PauseOnBattery;
         _cmbFps.SelectedItem = _settings.TargetFps <= 0
             ? "Auto"
             : _settings.TargetFps.ToString();
@@ -1073,10 +1067,10 @@ public class ConfigForm : Form
         int deltaY = newSpeciesY - oldSpeciesY;
         if (deltaY == 0) return;
 
-        // Move all controls that are at or below speciesHeader
+        // Move all controls that are at or below speciesHeader (exclude emitter rows — already positioned)
         foreach (Control ctrl in Controls.Cast<Control>().ToArray())
         {
-            if (ctrl.Location.Y >= oldSpeciesY)
+            if (ctrl.Location.Y >= oldSpeciesY && !_bubbleEmitterRows.Contains(ctrl))
             {
                 ctrl.Location = new Point(ctrl.Location.X, ctrl.Location.Y + deltaY);
             }
@@ -1173,8 +1167,6 @@ public class ConfigForm : Form
         var s = new SettingsData
         {
             SwimAngle = (float)_nudSwimAngle.Value,
-            IndependentScenesPerMonitor = _chkIndependent.Checked,
-            PauseOnBattery = _chkBattery.Checked,
         };
 
         string selectedFps = _cmbFps.SelectedItem?.ToString() ?? "Auto";

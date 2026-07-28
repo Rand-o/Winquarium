@@ -15,7 +15,7 @@ A Windows screensaver (`.scr`) rendering an animated underwater aquarium with sp
 - **Fixed-timestep simulation** — `SharedAquarium.Advance()` steps simulation forward using absolute wall-clock time; `Draw()` renders at the interpolated position
 - **Graceful error handling** — render failures are logged and the last good frame persists; after 300 consecutive failures rendering is suspended. All unhandled exceptions are caught and logged to `%LOCALAPPDATA%\AquariumSaver\AquariumSaver.log`
 - **Exit on input** — mouse movement > 80 px or any key press quits the screensaver (3-second startup grace period to ignore cursor settling)
-- **Settings dialog** — fish count, bubble density, speed multiplier, background colors, target FPS, battery-saver pause, with live preview panel
+- **Settings dialog** — fish count, bubble density, speed multiplier, background colors, target FPS, with live preview panel
 - **Self-contained publish** — single-file `.scr` with no .NET runtime dependency
 
 ## Architecture
@@ -126,8 +126,6 @@ Stored in `HKCU\Software\AquariumSaver`:
 | `BubbleDensity`               | 50         | 0–200              |
 | `SpeedMultiplier`             | 1.0        | 0.25–3.0           |
 | `ShowBackgroundChest`         | false      | bool               |
-| `IndependentScenesPerMonitor` | true       | bool               |
-| `PauseOnBattery`              | false      | bool               |
 | `BackgroundTopColor`          | #FF001845  | #RRGGBB / #AARRGGBB|
 | `BackgroundBottomColor`       | #FF000208  | #RRGGBB / #AARRGGBB|
 | `TargetFps`                   | 0 (Auto)   | 0, 30, 50, 60, 100, 120 |
