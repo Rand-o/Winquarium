@@ -409,20 +409,11 @@ public class ScreensaverForm : Form
 
     private static void ConfigureGraphics(Graphics graphics)
     {
-        graphics.CompositingMode =
-            CompositingMode.SourceOver;
-
-        graphics.CompositingQuality =
-            CompositingQuality.HighSpeed;
-
-        graphics.InterpolationMode =
-            InterpolationMode.HighQualityBilinear;
-
-        graphics.PixelOffsetMode =
-            PixelOffsetMode.HighQuality;
-
-        graphics.SmoothingMode =
-            SmoothingMode.None;
+        graphics.CompositingMode = CompositingMode.SourceOver;
+        graphics.CompositingQuality = CompositingQuality.HighSpeed;
+        graphics.InterpolationMode = InterpolationMode.HighQualityBilinear;
+        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        graphics.SmoothingMode = SmoothingMode.None;
     }
 
     private void CreateRenderResources(Size size)

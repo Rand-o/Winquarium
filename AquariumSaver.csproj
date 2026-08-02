@@ -8,6 +8,8 @@
     <RootNamespace>AquariumSaver</RootNamespace>
     <UseWindowsForms>true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Optimize>true</Optimize>
+    <ReadyToRun>true</ReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>

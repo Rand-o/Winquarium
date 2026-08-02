@@ -39,6 +39,10 @@ internal static class Program
 
             var mode = args.Length == 0 ? Mode.None : ParseMode(args[0]);
 
+            // Pre-load sprite atlas on startup so the first frame renders instantly.
+            // This runs before any UI thread is started, avoiding the initial black screen.
+            _ = SpriteAtlas.Instance;
+
             return mode switch
             {
                 Mode.Run or Mode.None => RunScreensaver(Settings.Load()),
