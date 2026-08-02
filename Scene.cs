@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace AquariumSaver;
@@ -133,35 +134,36 @@ public sealed class Scene : IDisposable
 
         graphics.CompositingMode = CompositingMode.SourceOver;
 
-        GraphicsState state = graphics.Save();
-        try
+        // Pre-compute values used by both fish and bubble drawing
+        float viewportHeight = clientSize.Height;
+        float viewportScale = Math.Clamp(viewportHeight / 1080f, 0.5f, 3.0f);
+        float time = _world.GetCurrentTime();
+
+        if (_localScene)
         {
-            if (!_localScene)
+            // Simple path: no viewport transform needed
+            _world.DrawFish(graphics, virtualBounds, viewportBounds, alpha: 1.0f);
+            _world.DrawBubbles(graphics, new Rectangle(0, 0, clientSize.Width, clientSize.Height), viewportScale, time);
+        }
+        else
+        {
+            // Multi-monitor path: translate into virtual-desktop coords for fish
+            GraphicsState state = graphics.Save();
+            try
             {
                 graphics.SetClip(new Rectangle(0, 0, clientSize.Width, clientSize.Height), CombineMode.Replace);
                 graphics.TranslateTransform(-viewportBounds.Left, -viewportBounds.Top, MatrixOrder.Append);
+
+                // Fish use virtual-desktop coords (shared across monitors)
+                _world.DrawFish(graphics, virtualBounds, viewportBounds, alpha: 1.0f);
             }
-
-            // Fish use virtual-desktop coords (shared across monitors)
-            _world.DrawFish(graphics, virtualBounds, viewportBounds, alpha: 1.0f);
-
-            if (!_localScene)
+            finally
             {
-                // Restore to client-local coords for bubbles
                 graphics.Restore(state);
-                state = graphics.Save();
             }
 
             // Bubbles use client-local coords (0,0) to (clientSize) — per-screen, like reefs
-            float viewportHeight = clientSize.Height;
-            float viewportScale = Math.Clamp(viewportHeight / 1080f, 0.5f, 3.0f);
-            Rectangle clientBounds = new(0, 0, clientSize.Width, clientSize.Height);
-            float time = _world.GetCurrentTime();
-            _world.DrawBubbles(graphics, clientBounds, viewportScale, time);
-        }
-        finally
-        {
-            graphics.Restore(state);
+            _world.DrawBubbles(graphics, new Rectangle(0, 0, clientSize.Width, clientSize.Height), viewportScale, time);
         }
     }
 
@@ -275,8 +277,21 @@ internal sealed class SharedAquarium
             float depth = 0.42f + random.NextSingle() * 0.58f;
             int pathSeed = seed * 7919 + i * 104729 + random.Next(int.MaxValue);
 
-            _fish[i] = new FishActor(i, entryOffset, cyclePeriod, swimDuration, effectiveSpeed,
-                cfg.Scale * scaleVariation, depth, random.NextSingle() * MathF.Tau, pathSeed);
+            // Pre-compute per-species constants — avoids per-frame lookups and divisions
+            Bitmap sampleFrame = species.Frames[0];
+            float aspectRatio = sampleFrame.Height / (float)Math.Max(1, sampleFrame.Width);
+            float targetWidthAt1080p = species.IsStingray ? 360f : 255f;
+            float tailBeatsPerSecond = species.IsStingray
+                ? 0.75f + effectiveSpeed * 8f
+                : 1.20f + effectiveSpeed * 14f;
+            float margin = species.IsStingray ? 0.19f : 0.14f;
+            float bobFrequency = species.IsStingray ? 0.40f : 0.72f;
+            float bobAmount = species.IsStingray ? 0.008f : 0.012f;
+
+            _fish[i] = new FishActor(species, entryOffset, cyclePeriod, swimDuration, effectiveSpeed,
+                cfg.Scale * scaleVariation, depth, random.NextSingle() * MathF.Tau, pathSeed,
+                aspectRatio, targetWidthAt1080p, tailBeatsPerSecond,
+                margin, bobFrequency, bobAmount, species.FacesRight);
         }
 
         // Sort fish by depth once after construction — avoids per-frame LINQ allocation.
@@ -374,8 +389,6 @@ internal sealed class SharedAquarium
 
     private void DrawFishLayer(Graphics graphics, Rectangle world, float viewportScale, float time, bool rearLayer)
     {
-        SpriteAtlas atlas = SpriteAtlas.Instance;
-
         // Fish array is pre-sorted by depth — draw directly without LINQ.
         foreach (FishActor fish in _fish)
         {
@@ -397,49 +410,40 @@ internal sealed class SharedAquarium
             float baseY = 0.10f + r1 * 0.55f;
             float yDrift = (r2 - 0.5f) * 0.95f;
 
-            FishSpriteSet species = atlas.GetSpecies(fish.Species);
-            float margin = species.IsStingray ? 0.19f : 0.14f;
             float swimProgress = cycleTime / fish.SwimDuration;
 
             float normalizedX = movesRight
-                ? -margin + swimProgress * (1f + margin * 2f)
-                : 1f + margin - swimProgress * (1f + margin * 2f);
+                ? -fish.Margin + swimProgress * (1f + fish.Margin * 2f)
+                : 1f + fish.Margin - swimProgress * (1f + fish.Margin * 2f);
 
-            if (normalizedX < -margin - 0.01f || normalizedX > 1f + margin + 0.01f) continue;
+            if (normalizedX < -fish.Margin - 0.01f || normalizedX > 1f + fish.Margin + 0.01f) continue;
 
-            float bobFrequency = species.IsStingray ? 0.40f : 0.72f;
-            float bobAmount = species.IsStingray ? 0.008f : 0.012f;
-            float bob = MathF.Sin(time * bobFrequency + fish.Phase) * bobAmount
+            float bob = MathF.Sin(time * fish.BobFrequency + fish.Phase) * fish.BobAmount
                       + MathF.Sin(time * 0.21f + fish.Phase * 1.7f) * 0.007f;
             float yAngle = yDrift * swimProgress;
 
             float x = world.Left + normalizedX * world.Width;
             float y = world.Top + (baseY + bob + yAngle) * world.Height;
 
-            // More predictable size formula anchored to 1080p.
-            float targetWidthAt1080p = species.IsStingray ? 360f : 255f;
+            // Size formula anchored to 1080p — uses precomputed TargetWidthAt1080p
             float depthScale = 0.84f + fish.Depth * 0.30f;
-            float width = targetWidthAt1080p * viewportScale * fish.Scale * depthScale;
+            float width = fish.TargetWidthAt1080p * viewportScale * fish.Scale * depthScale;
 
-            float tailBeatsPerSecond = species.IsStingray
-                ? 0.75f + fish.Speed * 8f
-                : 1.20f + fish.Speed * 14f;
+            // Frame selection — uses cached Species reference and FrameCount
+            float framePosition = time * fish.TailBeatsPerSecond * fish.Species.FrameCount
+                                + fish.Phase / MathF.Tau * fish.Species.FrameCount;
+            int frame0 = (int)MathF.Floor(framePosition) % fish.Species.FrameCount;
+            if (frame0 < 0) frame0 += fish.Species.FrameCount;
+            Bitmap sprite0 = fish.Species.Frames[frame0];
 
-            float framePosition = time * tailBeatsPerSecond * species.FrameCount
-                                + fish.Phase / MathF.Tau * species.FrameCount;
-            int frame0 = (int)MathF.Floor(framePosition);
-            Bitmap sprite0 = atlas.GetFishFrame(fish.Species, frame0);
-
-            float aspectRatio = sprite0.Height / (float)Math.Max(1, sprite0.Width);
-            float height = width * aspectRatio;
-            bool flipHorizontally = species.FacesRight != movesRight;
-            float opacity = 1f;
-            float brightness = 1f;
+            // Aspect ratio precomputed — but re-verify with actual frame (frames may differ slightly)
+            float height = width * sprite0.Height / (float)Math.Max(1, sprite0.Width);
+            bool flipHorizontally = fish.FacesRight != movesRight;
 
             // Swim angle: use the configured global swim angle, clamped by yDrift direction
             float swimAngle = MathF.Sign(yDrift) * _swimAngleRad * MathF.Min(MathF.Abs(yDrift), 1.0f);
 
-            DrawFish(graphics, sprite0, x, y, width, height, flipHorizontally, brightness, opacity, swimAngle);
+            DrawFishFast(graphics, sprite0, x, y, width, height, flipHorizontally, swimAngle);
         }
     }
 
@@ -457,6 +461,9 @@ internal sealed class SharedAquarium
     public void DrawBubbles(Graphics graphics, Rectangle viewport, float viewportScale, float time)
     {
         float referenceHeight = viewport.Height;
+        float viewportLeft = viewport.Left;
+        float viewportTop = viewport.Top;
+        float viewportWidth = viewport.Width;
 
         foreach (BubbleEmitter emitter in _bubbleEmitters)
         {
@@ -465,53 +472,38 @@ internal sealed class SharedAquarium
             // Advance emission: spawn new bubbles if it's time and cap not reached
             emitter.AdvanceEmission(time);
 
+            // Purge expired bubbles in-place (no allocations)
+            emitter.PurgeExpired(time);
+
             // Draw active bubbles
-            for (int i = emitter.ActiveBubbles.Count - 1; i >= 0; i--)
+            for (int i = 0; i < emitter.Count; i++)
             {
-                                var bubble = emitter.ActiveBubbles[i];
+                ref Bubble bubble = ref emitter[i];
 
                 // Compute float progress from spawn time
                 float floatProgress = (time - bubble.SpawnTime) / bubble.Duration;
 
-                // Remove expired bubbles
-                if (floatProgress > 1.0f)
-                {
-                    emitter.ActiveBubbles.RemoveAt(i);
-                    continue;
-                }
-
                 // Diameter with growth: 0.85x at spawn to 1.2x at exit
                 float diameterAt1080p = bubble.SizeAt1080p * (0.85f + floatProgress * 0.35f);
-                float diameter = diameterAt1080p * viewportScale;
-                diameter = Math.Max(3f, diameter);
+                float diameter = Math.Max(3f, diameterAt1080p * viewportScale);
 
                 // Horizontal position with sway — relative to this viewport (each screen independently)
                 float sway = MathF.Sin(time * 1.75f + bubble.SwayPhase) * referenceHeight * 0.008f;
                 float halfDiam = diameter * 0.5f;
-                float x = viewport.Left + (emitter.X / 100f) * viewport.Width + sway;
-                x = Math.Clamp(x, viewport.Left + halfDiam, viewport.Left + viewport.Width - halfDiam);
+                float x = Math.Clamp(viewportLeft + (emitter.X * 0.01f) * viewportWidth + sway,
+                    viewportLeft + halfDiam, viewportLeft + viewportWidth - halfDiam);
 
                 // Vertical position: linear rise from emitter Y to top of screen
-                float startY = viewport.Top + (emitter.Y / 100f) * viewport.Height;
-                float y = startY - floatProgress * viewport.Height;
+                float startY = viewportTop + (emitter.Y * 0.01f) * referenceHeight;
+                float y = startY - floatProgress * referenceHeight;
 
-                // Opacity: fade in first 10%, full middle 70%, fade out last 20%
-                float opacity;
-                if (floatProgress < 0.1f)
-                    opacity = floatProgress / 0.1f * 0.6f;
-                else if (floatProgress > 0.8f)
-                    opacity = (1.0f - floatProgress) / 0.2f * 0.6f;
-                else
-                    opacity = 0.6f;
-
-                DrawBubble(graphics, x, y, diameter, opacity);
+                DrawBubble(graphics, x, y, diameter);
             }
         }
     }
 
-    private static void DrawBubble(Graphics graphics, float x, float y, float diameter, float opacity)
+    private static void DrawBubble(Graphics graphics, float x, float y, float diameter)
     {
-        diameter = Math.Max(3f, diameter);
         Bitmap sprite = SpriteAtlas.Instance.GetBubbleForDiameter(diameter);
 
         /*
@@ -520,24 +512,28 @@ internal sealed class SharedAquarium
          * causing the bubble to render at the wrong screen position
          * (transform order issue with DrawImage(Image, Rectangle)).
          */
-        float dstX = x - diameter * 0.5f;
-        float dstY = y - diameter * 0.5f;
-        graphics.DrawImage(sprite,
-            dstX, dstY, diameter, diameter);
+        graphics.DrawImage(sprite, x - diameter * 0.5f, y - diameter * 0.5f, diameter, diameter);
     }
 
-    // Shared ImageAttributes to avoid per-frame GC allocation
+    // Shared ImageAttributes/ColorMatrix — avoids per-frame GC allocation.
+    // DrawImage copies the matrix values internally so this is safe on a single UI thread.
     private static readonly ImageAttributes s_fishImageAttributes = new();
     private static readonly ColorMatrix s_fishColorMatrix = new();
 
+    /// <summary>Fast path for the common case: full opacity, full brightness.</summary>
     private static void DrawFish(Graphics graphics, Bitmap sprite, float centerX, float centerY,
         float width, float height, bool flipHorizontally, float brightness, float opacity, float angle)
     {
-        // Fast path: no transform needed — skip Save/Restore overhead
-        bool needsTransform = (angle != 0f) || flipHorizontally;
-        bool needsColor = (brightness < 0.999f) || (opacity < 0.999f);
+        // Current caller always passes brightness=1f, opacity=1f — use the fast path directly.
+        // The general parameters are kept for API compatibility if future features need them.
+        DrawFishFast(graphics, sprite, centerX, centerY, width, height, flipHorizontally, angle);
+    }
 
-        if (!needsTransform && !needsColor)
+    private static void DrawFishFast(Graphics graphics, Bitmap sprite, float centerX, float centerY,
+        float width, float height, bool flipHorizontally, float angle)
+    {
+        // Fast path: no transform needed — single DrawImage, no Save/Restore
+        if (angle == 0f && !flipHorizontally)
         {
             graphics.DrawImage(sprite, centerX - width * 0.5f, centerY - height * 0.5f, width, height);
             return;
@@ -549,22 +545,7 @@ internal sealed class SharedAquarium
             graphics.TranslateTransform(centerX, centerY);
             if (angle != 0f) graphics.RotateTransform(angle * 180f / MathF.PI);
             if (flipHorizontally) graphics.ScaleTransform(-1f, 1f);
-
-            var destination = new RectangleF(-width * 0.5f, -height * 0.5f, width, height);
-
-            if (!needsColor)
-            { graphics.DrawImage(sprite, destination); return; }
-
-            // Reuse shared ImageAttributes/ColorMatrix — DrawImage copies values internally
-            s_fishColorMatrix.Matrix00 = brightness;
-            s_fishColorMatrix.Matrix11 = brightness;
-            s_fishColorMatrix.Matrix22 = brightness;
-            s_fishColorMatrix.Matrix33 = opacity;
-            s_fishColorMatrix.Matrix44 = 1f;
-            s_fishImageAttributes.SetColorMatrix(s_fishColorMatrix);
-
-            graphics.DrawImage(sprite, Rectangle.Truncate(destination),
-                0, 0, sprite.Width, sprite.Height, GraphicsUnit.Pixel, s_fishImageAttributes);
+            graphics.DrawImage(sprite, new RectangleF(-width * 0.5f, -height * 0.5f, width, height));
         }
         finally { graphics.Restore(state); }
     }
@@ -577,7 +558,7 @@ internal sealed class SharedAquarium
 
     private readonly struct FishActor
     {
-        public int Species { get; }
+        public FishSpriteSet Species { get; }            // cached reference — avoids per-frame atlas lookup
         public float EntryOffset { get; }
         public float CyclePeriod { get; }
         public float SwimDuration { get; }
@@ -586,13 +567,26 @@ internal sealed class SharedAquarium
         public float Depth { get; }
         public float Phase { get; }
         public int PathSeed { get; }
+        public float AspectRatio { get; }                // precomputed sprite height/width
+        public float TargetWidthAt1080p { get; }         // precomputed per-species
+        public float TailBeatsPerSecond { get; }         // precomputed per-species
+        public float Margin { get; }                     // precomputed per-species (stingray vs fish)
+        public float BobFrequency { get; }               // precomputed per-species
+        public float BobAmount { get; }                  // precomputed per-species
+        public bool FacesRight { get; }                  // cached from species
 
-        public FishActor(int species, float entryOffset, float cyclePeriod, float swimDuration,
-            float speed, float scale, float depth, float phase, int pathSeed)
+        public FishActor(FishSpriteSet species, float entryOffset, float cyclePeriod, float swimDuration,
+            float speed, float scale, float depth, float phase, int pathSeed,
+            float aspectRatio, float targetWidthAt1080p, float tailBeatsPerSecond,
+            float margin, float bobFrequency, float bobAmount, bool facesRight)
         {
             Species = species; EntryOffset = entryOffset; CyclePeriod = cyclePeriod;
             SwimDuration = swimDuration; Speed = speed; Scale = scale; Depth = depth;
             Phase = phase; PathSeed = pathSeed;
+            AspectRatio = aspectRatio; TargetWidthAt1080p = targetWidthAt1080p;
+            TailBeatsPerSecond = tailBeatsPerSecond;
+            Margin = margin; BobFrequency = bobFrequency; BobAmount = bobAmount;
+            FacesRight = facesRight;
         }
     }
 
@@ -612,7 +606,13 @@ internal sealed class SharedAquarium
         private readonly float _sizeMax;
         private readonly Random _random;
 
-        public readonly List<Bubble> ActiveBubbles = new(MaxActiveBubbles);
+        // Fixed-size array + count — avoids List<T>.RemoveAt() array copies and allocations
+        private readonly Bubble[] _bubbles = new Bubble[MaxActiveBubbles];
+        private int _count;
+
+        public int Count => _count;
+
+        public ref Bubble this[int index] => ref _bubbles[index];
 
         public BubbleEmitter(BubbleEmitterConfig cfg, Random random)
         {
@@ -634,26 +634,42 @@ internal sealed class SharedAquarium
         {
             if (!Enabled) return;
 
-            if (currentTime >= _nextEmissionTime && ActiveBubbles.Count < MaxActiveBubbles)
+            if (currentTime >= _nextEmissionTime && _count < MaxActiveBubbles)
             {
                 // Spawn a new bubble
                 float sizeRange = _sizeMax - _sizeMin;
-                ActiveBubbles.Add(new Bubble
+                _bubbles[_count++] = new Bubble
                 {
                     SizeAt1080p = _sizeMin + sizeRange * _random.NextSingle(),
                     SwayPhase = _random.NextSingle() * MathF.Tau,
                     SpawnTime = currentTime,
                     Duration = _duration,
-                });
+                };
 
                 // Schedule next emission: random interval [0.3, 1.5] seconds
                 _nextEmissionTime = currentTime + 0.3f + _random.NextSingle() * 1.2f;
             }
-            else if (ActiveBubbles.Count >= MaxActiveBubbles)
+            else if (_count >= MaxActiveBubbles)
             {
                 // Cap reached — advance nextEmissionTime so we don't retry every frame
                 _nextEmissionTime = currentTime + 0.3f;
             }
+        }
+
+        /// <summary>Remove expired bubbles in-place (swap with last to avoid array copy).</summary>
+        public void PurgeExpired(float time)
+        {
+            int write = 0;
+            for (int read = 0; read < _count; read++)
+            {
+                float progress = (time - _bubbles[read].SpawnTime) / _bubbles[read].Duration;
+                if (progress <= 1.0f)
+                {
+                    if (write != read) _bubbles[write] = _bubbles[read];
+                    write++;
+                }
+            }
+            _count = write;
         }
     }
 

@@ -41,6 +41,7 @@ internal static class Program
 
             // Pre-load sprite atlas on startup so the first frame renders instantly.
             // This runs before any UI thread is started, avoiding the initial black screen.
+            // Parallel.For inside SpriteAtlas uses all CPU cores for PNG decode.
             _ = SpriteAtlas.Instance;
 
             return mode switch

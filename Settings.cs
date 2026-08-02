@@ -120,7 +120,16 @@ public sealed class SettingsData
     {
         SwimAngle = Math.Clamp(SwimAngle, SwimAngleMin, SwimAngleMax);
         if (TargetFps > 0)
-            TargetFps = AllowedFpsValues.OrderBy(v => Math.Abs(v - TargetFps)).First();
+        {
+            // Linear scan over 5 values — faster than LINQ OrderBy which allocates
+            int best = AllowedFpsValues[0], bestDiff = Math.Abs(AllowedFpsValues[0] - TargetFps);
+            for (int i = 1; i < AllowedFpsValues.Length; i++)
+            {
+                int d = Math.Abs(AllowedFpsValues[i] - TargetFps);
+                if (d < bestDiff) { best = AllowedFpsValues[i]; bestDiff = d; }
+            }
+            TargetFps = best;
+        }
         if (string.IsNullOrWhiteSpace(BackgroundTopColor)) BackgroundTopColor = DefaultBackgroundTopColor;
         if (string.IsNullOrWhiteSpace(BackgroundBottomColor)) BackgroundBottomColor = DefaultBackgroundBottomColor;
 

@@ -19,22 +19,58 @@ internal static class AppLog
             "AquariumSaver",
             "AquariumSaver.log");
 
+    // Lock-free ring buffer for log messages — flushed periodically to disk.
+    private const int RingSize = 64;
+    private static readonly string[] _ring = new string[RingSize];
+    private static int _head, _tail;
+    private static readonly object _lock = new();
+
     public static void Log(string message)
     {
         try
         {
             string? directory = Path.GetDirectoryName(LogPath);
-
             if (!string.IsNullOrEmpty(directory))
                 Directory.CreateDirectory(directory);
 
-            File.AppendAllText(
-                LogPath,
-                $"{DateTime.Now:O} {message}{Environment.NewLine}");
+            string entry = $"{DateTime.UtcNow:O} {message}{Environment.NewLine}";
+
+            lock (_lock)
+            {
+                _ring[_head] = entry;
+                _head = (_head + 1) % RingSize;
+                if (_head == _tail)
+                    _tail = (_tail + 1) % RingSize; // overflow: drop oldest
+            }
+
+            // Flush infrequently to avoid I/O on the render thread
+            FlushIfNeeded();
         }
         catch
         {
             // Logging must never crash the screensaver.
+        }
+    }
+
+    private static long _lastFlushTicks;
+
+    private static void FlushIfNeeded()
+    {
+        long now = DateTime.UtcNow.Ticks;
+        // Flush at most once per second
+        if (now - _lastFlushTicks < TimeSpan.FromSeconds(1).Ticks) return;
+        _lastFlushTicks = now;
+
+        lock (_lock)
+        {
+            if (_tail == _head) return; // nothing to flush
+
+            using var sw = new StreamWriter(LogPath, append: true);
+            while (_tail != _head)
+            {
+                sw.Write(_ring[_tail]);
+                _tail = (_tail + 1) % RingSize;
+            }
         }
     }
 }
@@ -746,9 +782,12 @@ public class PreviewForm : Form
         };
 
         _scene = new Scene(42, previewSettings, ClientSize);
-        _backBuffer = new Bitmap(ClientSize.Width, ClientSize.Height);
+        _backBuffer = new Bitmap(ClientSize.Width, ClientSize.Height, PixelFormat.Format32bppPArgb);
         _backGraphics = Graphics.FromImage(_backBuffer);
-        _backGraphics.SmoothingMode = SmoothingMode.AntiAlias;
+        _backGraphics.CompositingQuality = CompositingQuality.HighSpeed;
+        _backGraphics.InterpolationMode = InterpolationMode.HighQualityBilinear;
+        _backGraphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        _backGraphics.SmoothingMode = SmoothingMode.None;
 
         _renderTimer = new System.Windows.Forms.Timer { Interval = 33 };
         _renderTimer.Tick += (_, _) => { if (!_closing) Invalidate(); };
@@ -794,9 +833,12 @@ public class PreviewForm : Form
         _scene?.Dispose();
         _scene = null;
 
-        _backBuffer = new Bitmap(ClientSize.Width, ClientSize.Height);
+        _backBuffer = new Bitmap(ClientSize.Width, ClientSize.Height, PixelFormat.Format32bppPArgb);
         _backGraphics = Graphics.FromImage(_backBuffer);
-        _backGraphics.SmoothingMode = SmoothingMode.AntiAlias;
+        _backGraphics.CompositingQuality = CompositingQuality.HighSpeed;
+        _backGraphics.InterpolationMode = InterpolationMode.HighQualityBilinear;
+        _backGraphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        _backGraphics.SmoothingMode = SmoothingMode.None;
 
         _scene = new Scene(42, new SettingsData {
             SwimAngle = _settings.SwimAngle,
@@ -1127,8 +1169,23 @@ public class ConfigForm : Form
         _btnAddEmitter.Enabled = _bubbleEmitterRows.Count < SettingsData.MaxEmitters;
     }
 
+    // Debounce preview updates — coalesce rapid UI changes into a single rebuild.
+    private System.Windows.Forms.Timer? _previewDebounceTimer;
+
     void UpdatePreview()
     {
+        // Debounce: if called rapidly (e.g. dragging a NumericUpDown), only rebuild once.
+        _previewDebounceTimer?.Stop();
+        _previewDebounceTimer ??= new System.Windows.Forms.Timer { Interval = 150 };
+        _previewDebounceTimer.Tick -= OnDebounceTick;
+        _previewDebounceTimer.Tick += OnDebounceTick;
+        _previewDebounceTimer.Start();
+    }
+
+    void OnDebounceTick(object? sender, EventArgs e)
+    {
+        _previewDebounceTimer?.Stop();
+
         // Build settings from current UI state
         var previewSettings = BuildSettingsFromUi();
 
@@ -1201,6 +1258,7 @@ public class ConfigForm : Form
 
     protected override void OnClosed(EventArgs e)
     {
+        _previewDebounceTimer?.Stop(); _previewDebounceTimer?.Dispose();
         _previewTimer?.Stop(); _previewTimer?.Dispose(); _previewScene?.Dispose();
         base.OnClosed(e);
     }
@@ -1424,33 +1482,5 @@ public class ConfigForm : Form
             _nudScale.ValueChanged += (_, _) => OnChanged?.Invoke();
             Controls.Add(_nudScale);
         }
-    }
-}
-
-// ── FrameClock ─────────────────────────────────────────────────────────────────
-
-public class FrameClock
-{
-    readonly Stopwatch _sw = Stopwatch.StartNew();
-    double _accumulated, _lastFrameTime;
-    readonly double _targetInterval;
-    public const float MaxDelta = 0.05f;
-
-    public FrameClock(int targetFps) { _targetInterval = 1.0 / targetFps; }
-
-    public bool TryWaitTick()
-    {
-        var elapsed = _sw.Elapsed.TotalSeconds;
-        if (elapsed - _lastFrameTime < _targetInterval) return false;
-        _accumulated += _targetInterval;
-        _lastFrameTime = elapsed;
-        return true;
-    }
-
-    public double GetDelta()
-    {
-        var raw = _accumulated;
-        _accumulated = 0;
-        return Math.Min(raw, MaxDelta);
     }
 }
