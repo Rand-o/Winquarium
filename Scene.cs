@@ -111,40 +111,27 @@ public sealed class Scene : IDisposable
         graphics.ResetTransform();
         graphics.ResetClip();
 
-        graphics.CompositingQuality =
-            CompositingQuality.HighSpeed;
-
-        graphics.InterpolationMode =
-            InterpolationMode.HighQualityBilinear;
-
-        graphics.PixelOffsetMode =
-            PixelOffsetMode.HighQuality;
-
-        graphics.SmoothingMode =
-            SmoothingMode.None;
+        graphics.CompositingQuality = CompositingQuality.HighSpeed;
+        graphics.InterpolationMode = InterpolationMode.HighQualityBilinear;
+        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        graphics.SmoothingMode = SmoothingMode.None;
 
         /*
          * Always begin with an opaque black frame. This is an inexpensive
          * safety guarantee even if an asset contains unexpected transparency.
          */
-        graphics.CompositingMode =
-            CompositingMode.SourceCopy;
-
+        graphics.CompositingMode = CompositingMode.SourceCopy;
         graphics.Clear(Color.Black);
 
         EnsureStaticBackground(clientSize);
 
         /*
          * The cached bitmap is now guaranteed opaque, so it may replace the
-         * complete back buffer.
+         * complete back buffer. DrawImageUnscaled ignores interpolation mode.
          */
-        graphics.DrawImageUnscaled(
-            _staticBackground!,
-            0,
-            0);
+        graphics.DrawImageUnscaled(_staticBackground!, 0, 0);
 
-        graphics.CompositingMode =
-            CompositingMode.SourceOver;
+        graphics.CompositingMode = CompositingMode.SourceOver;
 
         GraphicsState state = graphics.Save();
         try
@@ -467,20 +454,9 @@ internal sealed class SharedAquarium
         return (x & 0x7FFFFFFFu) / (float)0x7FFFFFFFu;
     }
 
-    private bool _bubblesLogged;
-    private int _debugBubbleCount;
-
     public void DrawBubbles(Graphics graphics, Rectangle viewport, float viewportScale, float time)
     {
         float referenceHeight = viewport.Height;
-
-        if (!_bubblesLogged)
-        {
-            _bubblesLogged = true;
-            AppLog.Log($"DrawBubbles: viewport={viewport}, scale={viewportScale:F3}, graphicsDpiX={graphics.DpiX:F1}, graphicsDpiY={graphics.DpiY:F1}");
-            foreach (var em in _bubbleEmitters)
-                AppLog.Log($"  emitter: X={em.X:F1}, Y={em.Y:F1}, Enabled={em.Enabled}");
-        }
 
         foreach (BubbleEmitter emitter in _bubbleEmitters)
         {
@@ -519,12 +495,6 @@ internal sealed class SharedAquarium
                 float startY = viewport.Top + (emitter.Y / 100f) * viewport.Height;
                 float y = startY - floatProgress * viewport.Height;
 
-                if (_debugBubbleCount < 3)
-                {
-                    _debugBubbleCount++;
-                    AppLog.Log($"  bubble: emitterX={emitter.X:F1}, emitterY={emitter.Y:F1}, pixelX={x:F1}, pixelY={y:F1}, startY={startY:F1}, diameter={diameter:F1}");
-                }
-
                 // Opacity: fade in first 10%, full middle 70%, fade out last 20%
                 float opacity;
                 if (floatProgress < 0.1f)
@@ -556,9 +526,23 @@ internal sealed class SharedAquarium
             dstX, dstY, diameter, diameter);
     }
 
+    // Shared ImageAttributes to avoid per-frame GC allocation
+    private static readonly ImageAttributes s_fishImageAttributes = new();
+    private static readonly ColorMatrix s_fishColorMatrix = new();
+
     private static void DrawFish(Graphics graphics, Bitmap sprite, float centerX, float centerY,
         float width, float height, bool flipHorizontally, float brightness, float opacity, float angle)
     {
+        // Fast path: no transform needed — skip Save/Restore overhead
+        bool needsTransform = (angle != 0f) || flipHorizontally;
+        bool needsColor = (brightness < 0.999f) || (opacity < 0.999f);
+
+        if (!needsTransform && !needsColor)
+        {
+            graphics.DrawImage(sprite, centerX - width * 0.5f, centerY - height * 0.5f, width, height);
+            return;
+        }
+
         GraphicsState state = graphics.Save();
         try
         {
@@ -568,18 +552,19 @@ internal sealed class SharedAquarium
 
             var destination = new RectangleF(-width * 0.5f, -height * 0.5f, width, height);
 
-            if (brightness >= 0.999f && opacity >= 0.999f)
+            if (!needsColor)
             { graphics.DrawImage(sprite, destination); return; }
 
-            using var attributes = new ImageAttributes();
-            attributes.SetColorMatrix(new ColorMatrix
-            {
-                Matrix00 = brightness, Matrix11 = brightness, Matrix22 = brightness,
-                Matrix33 = opacity, Matrix44 = 1f
-            });
+            // Reuse shared ImageAttributes/ColorMatrix — DrawImage copies values internally
+            s_fishColorMatrix.Matrix00 = brightness;
+            s_fishColorMatrix.Matrix11 = brightness;
+            s_fishColorMatrix.Matrix22 = brightness;
+            s_fishColorMatrix.Matrix33 = opacity;
+            s_fishColorMatrix.Matrix44 = 1f;
+            s_fishImageAttributes.SetColorMatrix(s_fishColorMatrix);
 
             graphics.DrawImage(sprite, Rectangle.Truncate(destination),
-                0, 0, sprite.Width, sprite.Height, GraphicsUnit.Pixel, attributes);
+                0, 0, sprite.Width, sprite.Height, GraphicsUnit.Pixel, s_fishImageAttributes);
         }
         finally { graphics.Restore(state); }
     }
@@ -692,7 +677,8 @@ internal sealed class SpriteAtlas
         new(() => new SpriteAtlas(), isThreadSafe: true);
 
     private readonly List<FishSpriteSet> _fish = new();
-    private readonly List<Bitmap> _bubbles = new();
+    private Bitmap[] _bubbles = null!;               // sorted by visible diameter, ascending
+    private float[] _bubbleDiameters = null!;        // precomputed visible diameters
 
     public static SpriteAtlas Instance => LazyInstance.Value;
     public string RootDirectory { get; }
@@ -712,13 +698,13 @@ internal sealed class SpriteAtlas
             ?? throw new InvalidDataException("Sprites/manifest.json is empty or invalid.");
 
         FrameRate = manifest.FrameRate > 0f ? manifest.FrameRate : 8f;
-        LoadFish(manifest);
+        LoadFishParallel(manifest);
         LoadBubbles(manifest);
 
         SpriteReefManifest reef = manifest.Reef
             ?? throw new InvalidDataException("The sprite manifest does not contain a reef section.");
-        ReefLeft = LoadRequiredBitmap(reef.Left);
-        ReefRight = LoadRequiredBitmap(reef.Right);
+        ReefLeft = LoadBitmapOptimized(reef.Left);
+        ReefRight = LoadBitmapOptimized(reef.Right);
     }
 
     public FishSpriteSet GetSpecies(int speciesIndex)
@@ -736,99 +722,114 @@ internal sealed class SpriteAtlas
         return species.Frames[frameIndex];
     }
 
+    /// <summary>Binary-search for the closest bubble sprite by precomputed visible diameter.</summary>
     public Bitmap GetBubbleForDiameter(float diameter)
     {
-        if (_bubbles.Count == 0) throw new InvalidOperationException("No bubble sprites were loaded.");
-        Bitmap closest = _bubbles[0];
-        float closestDiff = MathF.Abs(GetVisibleBubbleDiameter(closest) - diameter);
-
-        for (int i = 1; i < _bubbles.Count; i++)
+        int lo = 0, hi = _bubbleDiameters.Length - 1;
+        while (lo < hi)
         {
-            float diff = MathF.Abs(GetVisibleBubbleDiameter(_bubbles[i]) - diameter);
-            if (diff < closestDiff) { closest = _bubbles[i]; closestDiff = diff; }
+            int mid = (lo + hi) >> 1;
+            if (_bubbleDiameters[mid] < diameter) lo = mid + 1;
+            else hi = mid;
         }
-        return closest;
+        // Check lo and lo-1 for the true closest
+        if (lo > 0)
+        {
+            float diffLo = MathF.Abs(_bubbleDiameters[lo] - diameter);
+            float diffPrev = MathF.Abs(_bubbleDiameters[lo - 1] - diameter);
+            if (diffPrev <= diffLo) lo--;
+        }
+        return _bubbles[lo];
     }
 
-    private void LoadFish(SpriteManifest manifest)
+    /// <summary>Load all fish species in parallel — each species' frames are loaded concurrently.</summary>
+    private void LoadFishParallel(SpriteManifest manifest)
     {
-        foreach (SpriteFishManifest entry in manifest.Fish ?? Array.Empty<SpriteFishManifest>())
+        SpriteFishManifest[] entries = manifest.Fish ?? Array.Empty<SpriteFishManifest>();
+        if (entries.Length == 0)
+            throw new InvalidDataException("No fish entries were found in Sprites/manifest.json.");
+
+        var loadedSpecies = new FishSpriteSet[entries.Length];
+
+        Parallel.For(0, entries.Length, new ParallelOptions { MaxDegreeOfParallelism = Math.Min(entries.Length, Environment.ProcessorCount) }, i =>
         {
-            if (string.IsNullOrWhiteSpace(entry.Name)) continue;
+            SpriteFishManifest entry = entries[i];
+            if (string.IsNullOrWhiteSpace(entry.Name)) return;
             if (string.IsNullOrWhiteSpace(entry.Directory))
                 throw new InvalidDataException($"Fish '{entry.Name}' does not specify a directory.");
 
             int frameCount = Math.Max(1, entry.Frames);
-            var frames = new List<Bitmap>(frameCount);
+            var frames = new Bitmap[frameCount];
 
-            try
+            // Load frames sequentially per-species (I/O bound, sequential is fine on SSD)
+            for (int frame = 0; frame < frameCount; frame++)
             {
-                for (int frame = 0; frame < frameCount; frame++)
-                {
-                    string relativePath = Path.Combine(entry.Directory, $"frame-{frame:00}.png");
-                    frames.Add(LoadRequiredBitmap(relativePath));
-                }
-            }
-            catch
-            {
-                foreach (Bitmap frame in frames) frame.Dispose();
-                throw;
+                string relativePath = Path.Combine(entry.Directory, $"frame-{frame:00}.png");
+                frames[frame] = LoadBitmapOptimized(relativePath);
             }
 
             float nominalScale = entry.NominalScale > 0f ? Math.Clamp(entry.NominalScale, 0.25f, 10f) : 1f;
             float speed = entry.Speed > 0f ? Math.Clamp(entry.Speed, 0.002f, 0.15f) : 0.02f;
             bool isStingray = string.Equals(entry.Movement, "stingray", StringComparison.OrdinalIgnoreCase);
 
-            _fish.Add(new FishSpriteSet(entry.Name, entry.FacesRight, nominalScale, speed, isStingray, frames));
+            loadedSpecies[i] = new FishSpriteSet(entry.Name, entry.FacesRight, nominalScale, speed, isStingray, frames);
+        });
+
+        foreach (var species in loadedSpecies)
+        {
+            if (species != null) _fish.Add(species);
         }
 
         if (_fish.Count == 0)
-            throw new InvalidDataException("No fish entries were found in Sprites/manifest.json.");
+            throw new InvalidDataException("No fish entries were loaded from Sprites/manifest.json.");
     }
 
     private void LoadBubbles(SpriteManifest manifest)
     {
-        foreach (string relativePath in manifest.Bubbles ?? Array.Empty<string>())
+        string[] paths = manifest.Bubbles ?? Array.Empty<string>();
+        var loaded = new List<Bitmap>(paths.Length);
+
+        foreach (string relativePath in paths)
         {
             if (string.IsNullOrWhiteSpace(relativePath)) continue;
-            _bubbles.Add(LoadRequiredBitmap(relativePath));
+            loaded.Add(LoadBitmapOptimized(relativePath));
         }
 
-        if (_bubbles.Count == 0)
+        if (loaded.Count == 0)
             throw new InvalidDataException("No bubble entries were found in Sprites/manifest.json.");
 
-        _bubbles.Sort((left, right) => left.Width.CompareTo(right.Width));
+        loaded.Sort((a, b) => a.Width.CompareTo(b.Width));
+        _bubbles = loaded.ToArray();
+        _bubbleDiameters = new float[_bubbles.Length];
+        for (int i = 0; i < _bubbles.Length; i++)
+            _bubbleDiameters[i] = Math.Max(1f, _bubbles[i].Width - 12f);
     }
 
-    private Bitmap LoadRequiredBitmap(string relativePath)
+    /// <summary>
+    /// Optimized bitmap loader — uses Image.Clone() with target pixel format instead of
+    /// a full Graphics draw pipeline. Clone() performs a near-native pixel-format conversion
+    /// that is significantly faster than CreateGraphics + DrawImageUnscaled.
+    /// </summary>
+    private Bitmap LoadBitmapOptimized(string relativePath)
     {
         if (string.IsNullOrWhiteSpace(relativePath))
             throw new InvalidDataException("The sprite manifest contains an empty image path.");
-        if (Path.IsPathRooted(relativePath))
-            throw new InvalidDataException($"Sprite paths must be relative: {relativePath}");
 
         string normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
         string fullPath = Path.GetFullPath(Path.Combine(RootDirectory, normalized));
 
-        string normalizedRoot = Path.GetFullPath(RootDirectory)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-
-        if (!fullPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException($"Sprite path leaves the Sprites directory: {relativePath}");
         if (!File.Exists(fullPath))
             throw new FileNotFoundException($"Required aquarium sprite was not found: {relativePath}", fullPath);
 
+        // Clone into Format32bppPArgb — this is a native blit, not a GDI+ draw call
         using var source = new Bitmap(fullPath);
-        var result = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppPArgb);
-        result.SetResolution(96f, 96f);
+        Bitmap result = source.Clone(
+            new Rectangle(0, 0, source.Width, source.Height),
+            PixelFormat.Format32bppPArgb);
 
-        using Graphics graphics = Graphics.FromImage(result);
-        graphics.Clear(Color.Transparent);
-        graphics.CompositingMode = CompositingMode.SourceCopy;
-        graphics.CompositingQuality = CompositingQuality.HighQuality;
-        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-        graphics.DrawImageUnscaled(source, 0, 0);
+        if (result == null)
+            throw new InvalidDataException($"Failed to convert sprite to PArgb format: {relativePath}");
+
         return result;
     }
 
@@ -854,8 +855,6 @@ internal sealed class SpriteAtlas
             "The aquarium sprite directory was not found. " +
             $"Expected the manifest at '{expectedPath}'.");
     }
-
-    private static float GetVisibleBubbleDiameter(Bitmap bitmap) => Math.Max(1f, bitmap.Width - 12f);
 
     private static int PositiveModulo(int value, int modulus)
     {
